@@ -4,6 +4,17 @@ export interface Env {
   AUDIT_BLOBS: R2Bucket;
   LEGACY_ARCHIVE: R2Bucket;
   ASSETS?: Fetcher;
+  EMAIL?: SendEmail;
+  MAIL_FROM?: string;
+  PASSWORD_RESET_ORIGIN?: string;
+  RECOVERY_ENABLED?: string;
+  IAP_PURCHASES_ENABLED?: string;
+  IAP_GOOGLE_PUBLIC_KEY?: string;
+  IAP_GOOGLE_SERVICE_ACCOUNT?: string;
+  IAP_GOOGLE_PACKAGE_NAME?: string;
+  IAP_APPLE_BUNDLE_ID?: string;
+  IAP_APPLE_VERIFICATION_MODE?: string;
+  IAP_ALLOW_TEST_PURCHASES?: string;
   PLAYER_TOKEN_SECRET: string;
   ADMIN_SESSION_SECRET?: string;
   ADMIN_DISCORD_IDS?: string;

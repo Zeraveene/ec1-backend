@@ -1,0 +1,617 @@
+{
+  "apple": {
+    "category": 2,
+    "item": {
+      "id": "apple",
+      "m_name": "Apple",
+      "amount": 8,
+      "type": 2,
+      "description": "Restore 500 MP",
+      "stack": 999,
+      "value": 500.0,
+      "percentValue": false,
+      "cooldown": 10.0,
+      "sellPrice": 250
+    }
+  },
+  "bread": {
+    "category": 2,
+    "item": {
+      "id": "bread",
+      "m_name": "Bread",
+      "amount": 2,
+      "type": 1,
+      "description": "Restore 300 HP",
+      "stack": 999,
+      "value": 300.0,
+      "percentValue": false,
+      "cooldown": 10.0,
+      "sellPrice": 250
+    }
+  },
+  "candy": {
+    "category": 1,
+    "item": {
+      "id": "candy",
+      "m_name": "Growth Candy",
+      "amount": 0,
+      "type": 4,
+      "description": "Used to feed your companion.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 5000
+    }
+  },
+  "cherry": {
+    "category": 2,
+    "item": {
+      "id": "cherry",
+      "m_name": "Cherry",
+      "amount": 4,
+      "type": 2,
+      "description": "Restore 100 MP",
+      "stack": 999,
+      "value": 100.0,
+      "percentValue": false,
+      "cooldown": 10.0,
+      "sellPrice": 125
+    }
+  },
+  "cleanser": {
+    "category": 2,
+    "item": {
+      "id": "cleanser",
+      "m_name": "Purified Water",
+      "amount": 12,
+      "type": 6,
+      "description": "Cleanse all debuff and negate any ailments for 10s",
+      "stack": 999,
+      "value": 10.0,
+      "percentValue": false,
+      "cooldown": 10.0,
+      "sellPrice": 5000
+    }
+  },
+  "cloth": {
+    "category": 1,
+    "item": {
+      "id": "cloth",
+      "m_name": "Thick Cloth",
+      "amount": 196,
+      "type": 0,
+      "description": "Core material for crafting Tier 1 armors",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 110
+    }
+  },
+  "dull_gem": {
+    "category": 1,
+    "item": {
+      "id": "dull_gem",
+      "m_name": "Sapphire Dust",
+      "amount": 3,
+      "type": 5,
+      "description": "use this item to increase Upgrade success rate by 10%",
+      "stack": 9999,
+      "value": 10.0,
+      "percentValue": true,
+      "cooldown": 0.0,
+      "sellPrice": 500
+    }
+  },
+  "egg": {
+    "category": 2,
+    "item": {
+      "id": "egg",
+      "m_name": "Egg",
+      "amount": 4,
+      "type": 1,
+      "description": "Restore 100 HP",
+      "stack": 999,
+      "value": 100.0,
+      "percentValue": false,
+      "cooldown": 10.0,
+      "sellPrice": 100
+    }
+  },
+  "expPotion": {
+    "category": 1,
+    "item": {
+      "id": "expPotion",
+      "m_name": "EXP Potion",
+      "amount": 60,
+      "type": 4,
+      "description": "increase 1,000 EXP",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 5000
+    }
+  },
+  "fabric": {
+    "category": 1,
+    "item": {
+      "id": "fabric",
+      "m_name": "Sturdy Fabric",
+      "amount": 167,
+      "type": 0,
+      "description": "Core material for crafting Tier 2 armors",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 170
+    }
+  },
+  "fire": {
+    "category": 1,
+    "item": {
+      "id": "fire",
+      "m_name": "Inferno Soul",
+      "amount": 0,
+      "type": 0,
+      "description": "Crystallized soul of a Demon. Emits a strong scorching aura.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 1500
+    }
+  },
+  "goldbar": {
+    "category": 1,
+    "item": {
+      "id": "goldbar",
+      "m_name": "Mythril Ingot",
+      "amount": 2,
+      "type": 0,
+      "description": "Core material for crafting Tier 3 armors and weapons.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 380
+    }
+  },
+  "grape": {
+    "category": 2,
+    "item": {
+      "id": "grape",
+      "m_name": "Grapes",
+      "amount": 3,
+      "type": 2,
+      "description": "Restore 300 MP",
+      "stack": 999,
+      "value": 300.0,
+      "percentValue": false,
+      "cooldown": 10.0,
+      "sellPrice": 350
+    }
+  },
+  "hide": {
+    "category": 1,
+    "item": {
+      "id": "hide",
+      "m_name": "Tough Hide",
+      "amount": 0,
+      "type": 0,
+      "description": "Core material for crafting Tier 3 armors",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 350
+    }
+  },
+  "ironbar": {
+    "category": 1,
+    "item": {
+      "id": "ironbar",
+      "m_name": "Iron Ingot",
+      "amount": 169,
+      "type": 0,
+      "description": "Core material for crafting Tier 1 armors and weapons.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 120
+    }
+  },
+  "jewel_courage_c": {
+    "category": 1,
+    "item": {
+      "id": "jewel_courage_c",
+      "m_name": "[Common] Red Jewel",
+      "amount": 0,
+      "type": 7,
+      "description": "A mysterious jewel used for socketing gears.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 500
+    }
+  },
+  "jewel_courage_e": {
+    "category": 1,
+    "item": {
+      "id": "jewel_courage_e",
+      "m_name": "[Epic] Red Jewel",
+      "amount": 0,
+      "type": 7,
+      "description": "A mysterious jewel used for socketing gears.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 15000
+    }
+  },
+  "jewel_courage_r": {
+    "category": 1,
+    "item": {
+      "id": "jewel_courage_r",
+      "m_name": "[Rare] Red Jewel",
+      "amount": 0,
+      "type": 7,
+      "description": "A mysterious jewel used for socketing gears.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 5000
+    }
+  },
+  "jewel_endurance_c": {
+    "category": 1,
+    "item": {
+      "id": "jewel_endurance_c",
+      "m_name": "[Common] Purple Jewel",
+      "amount": 0,
+      "type": 7,
+      "description": "A mysterious jewel used for socketing gears.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 500
+    }
+  },
+  "jewel_endurance_e": {
+    "category": 1,
+    "item": {
+      "id": "jewel_endurance_e",
+      "m_name": "[Epic] Purple Jewel",
+      "amount": 0,
+      "type": 7,
+      "description": "A mysterious jewel used for socketing gears.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 15000
+    }
+  },
+  "jewel_endurance_r": {
+    "category": 1,
+    "item": {
+      "id": "jewel_endurance_r",
+      "m_name": "[Rare] Purple Jewel",
+      "amount": 5,
+      "type": 7,
+      "description": "A mysterious jewel used for socketing gears.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 5000
+    }
+  },
+  "jewel_protection_c": {
+    "category": 1,
+    "item": {
+      "id": "jewel_protection_c",
+      "m_name": "[Common] Orange Jewel",
+      "amount": 0,
+      "type": 7,
+      "description": "A mysterious jewel used for socketing gears.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 500
+    }
+  },
+  "jewel_protection_e": {
+    "category": 1,
+    "item": {
+      "id": "jewel_protection_e",
+      "m_name": "[Epic] Orange Jewel",
+      "amount": 0,
+      "type": 7,
+      "description": "A mysterious jewel used for socketing gears.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 15000
+    }
+  },
+  "jewel_protection_r": {
+    "category": 1,
+    "item": {
+      "id": "jewel_protection_r",
+      "m_name": "[Rare] Orange Jewel",
+      "amount": 0,
+      "type": 7,
+      "description": "A mysterious jewel used for socketing gears.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 5000
+    }
+  },
+  "leather": {
+    "category": 1,
+    "item": {
+      "id": "leather",
+      "m_name": "Strong Leather",
+      "amount": 276,
+      "type": 0,
+      "description": "Core material for crafting Tier 4 armors",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 900
+    }
+  },
+  "lesserblue": {
+    "category": 2,
+    "item": {
+      "id": "lesserblue",
+      "m_name": "Lesser Blue Potion",
+      "amount": 0,
+      "type": 2,
+      "description": "Restore 30% MP",
+      "stack": 999,
+      "value": 30.0,
+      "percentValue": true,
+      "cooldown": 10.0,
+      "sellPrice": 1250
+    }
+  },
+  "lesserred": {
+    "category": 2,
+    "item": {
+      "id": "lesserred",
+      "m_name": "Lesser Red Potion",
+      "amount": 0,
+      "type": 1,
+      "description": "Restore 30% HP",
+      "stack": 999,
+      "value": 30.0,
+      "percentValue": true,
+      "cooldown": 10.0,
+      "sellPrice": 1000
+    }
+  },
+  "maxblue": {
+    "category": 2,
+    "item": {
+      "id": "maxblue",
+      "m_name": "Blue Elixir",
+      "amount": 0,
+      "type": 2,
+      "description": "Restore 100% MP",
+      "stack": 999,
+      "value": 100.0,
+      "percentValue": true,
+      "cooldown": 10.0,
+      "sellPrice": 4500
+    }
+  },
+  "maxred": {
+    "category": 2,
+    "item": {
+      "id": "maxred",
+      "m_name": "Red Elixir",
+      "amount": 0,
+      "type": 1,
+      "description": "Restore 100% HP",
+      "stack": 999,
+      "value": 100.0,
+      "percentValue": true,
+      "cooldown": 10.0,
+      "sellPrice": 4000
+    }
+  },
+  "meat": {
+    "category": 2,
+    "item": {
+      "id": "meat",
+      "m_name": "Meat",
+      "amount": 1,
+      "type": 1,
+      "description": "Restore 500 HP",
+      "stack": 999,
+      "value": 500.0,
+      "percentValue": false,
+      "cooldown": 10.0,
+      "sellPrice": 225
+    }
+  },
+  "medblue": {
+    "category": 2,
+    "item": {
+      "id": "medblue",
+      "m_name": "Blue Potion",
+      "amount": 0,
+      "type": 2,
+      "description": "Restore 50% MP",
+      "stack": 999,
+      "value": 50.0,
+      "percentValue": true,
+      "cooldown": 10.0,
+      "sellPrice": 1250
+    }
+  },
+  "medred": {
+    "category": 2,
+    "item": {
+      "id": "medred",
+      "m_name": "Red Potion",
+      "amount": 0,
+      "type": 1,
+      "description": "Restore 50% HP",
+      "stack": 999,
+      "value": 50.0,
+      "percentValue": true,
+      "cooldown": 10.0,
+      "sellPrice": 1000
+    }
+  },
+  "radiant_gem": {
+    "category": 1,
+    "item": {
+      "id": "radiant_gem",
+      "m_name": "Sapphire Stone",
+      "amount": 14,
+      "type": 5,
+      "description": "use this item to increase Upgrade success rate by 70%",
+      "stack": 9999,
+      "value": 70.0,
+      "percentValue": true,
+      "cooldown": 0.0,
+      "sellPrice": 10000
+    }
+  },
+  "relic_frag_a": {
+    "category": 1,
+    "item": {
+      "id": "relic_frag_a",
+      "m_name": "Mysterious Shard (A)",
+      "amount": 0,
+      "type": 4,
+      "description": "A piece of unknown material.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 10000
+    }
+  },
+  "relic_frag_w": {
+    "category": 1,
+    "item": {
+      "id": "relic_frag_w",
+      "m_name": "Mysterious Shard (W)",
+      "amount": 0,
+      "type": 4,
+      "description": "A piece of unknown material.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 10000
+    }
+  },
+  "shining_gem": {
+    "category": 1,
+    "item": {
+      "id": "shining_gem",
+      "m_name": "Sapphire Shard",
+      "amount": 287,
+      "type": 5,
+      "description": "use this item to increase Upgrade success rate by 25%",
+      "stack": 9999,
+      "value": 25.0,
+      "percentValue": true,
+      "cooldown": 0.0,
+      "sellPrice": 2000
+    }
+  },
+  "silverbar": {
+    "category": 1,
+    "item": {
+      "id": "silverbar",
+      "m_name": "Silver Ingot",
+      "amount": 5,
+      "type": 0,
+      "description": "Core material for crafting Tier 2 armors and weapons.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 180
+    }
+  },
+  "titaniumbar": {
+    "category": 1,
+    "item": {
+      "id": "titaniumbar",
+      "m_name": "Obsidian Ingot",
+      "amount": 54,
+      "type": 0,
+      "description": "Core material for crafting Tier 4 armors and weapons.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 950
+    }
+  },
+  "voids": {
+    "category": 1,
+    "item": {
+      "id": "voids",
+      "m_name": "Void Soul",
+      "amount": 31,
+      "type": 0,
+      "description": "Crystallized soul of a Demon. Acquired from Bosses in Sill Plains.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 550
+    }
+  },
+  "water": {
+    "category": 1,
+    "item": {
+      "id": "water",
+      "m_name": "Glacial Soul",
+      "amount": 1,
+      "type": 0,
+      "description": "Crystallized soul of a Demon. It emits an intense chilling aura. Acquired from Bosses in Salju Ridge.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 1400
+    }
+  },
+  "wind": {
+    "category": 1,
+    "item": {
+      "id": "wind",
+      "m_name": "Gale Soul",
+      "amount": 25,
+      "type": 0,
+      "description": "Crystallized soul of a Demon that emits a soothing breeze. Acquired from Bosses in Danos Desert.",
+      "stack": 9999,
+      "value": 0.0,
+      "percentValue": false,
+      "cooldown": 0.0,
+      "sellPrice": 650
+    }
+  }
+}

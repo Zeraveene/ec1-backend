@@ -1,0 +1,14 @@
+PRAGMA foreign_keys = ON;
+CREATE TABLE player (id TEXT PRIMARY KEY, display_name TEXT, save_version INTEGER NOT NULL DEFAULT 0, playtime REAL NOT NULL DEFAULT 0, save_state TEXT NOT NULL DEFAULT 'native_uninitialized', device_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, migrated_at INTEGER);
+CREATE TABLE auth_identity (provider TEXT NOT NULL, subject TEXT NOT NULL, player_id TEXT NOT NULL REFERENCES player(id), password_hash TEXT, salt TEXT, created_at INTEGER NOT NULL, PRIMARY KEY(provider,subject), UNIQUE(player_id,provider));
+CREATE TABLE auth_bootstrap (id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, fingerprint TEXT NOT NULL, player_id TEXT NOT NULL REFERENCES player(id), created_at INTEGER NOT NULL);
+CREATE TABLE auth_session (id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES player(id), provider TEXT NOT NULL, device_id TEXT, scope TEXT NOT NULL DEFAULT 'player', created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER);
+CREATE TABLE auth_refresh (hash TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES auth_session(id), expires_at INTEGER NOT NULL, consumed_at INTEGER, operation_id TEXT, successor_hash TEXT);
+CREATE TABLE auth_challenge (id TEXT PRIMARY KEY, provider TEXT NOT NULL, nonce TEXT NOT NULL, intent TEXT NOT NULL, player_id TEXT, redirect_uri TEXT, code_challenge TEXT, expires_at INTEGER NOT NULL, used_at INTEGER, proof_hash TEXT, verified_subject TEXT);
+CREATE TABLE auth_rate_limit (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE player_ban (player_id TEXT PRIMARY KEY REFERENCES player(id), reason TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER, revoked_at INTEGER);
+CREATE INDEX auth_session_player ON auth_session(player_id);
+CREATE INDEX auth_rate_expiry ON auth_rate_limit(expires_at);
+CREATE INDEX auth_challenge_expiry ON auth_challenge(expires_at);
+CREATE INDEX auth_refresh_expiry ON auth_refresh(expires_at);
+CREATE INDEX auth_session_expiry ON auth_session(expires_at);
