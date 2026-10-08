@@ -1,0 +1,33 @@
+{
+  "name": "ec1-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "check": "npm run typecheck && npm test && npm run build",
+    "deploy:staging": "npm run check && wrangler deploy --env staging",
+    "deploy": "npm run check && wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "4.12.16",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260911.1",
+    "@types/node": "22.5.5",
+    "@types/react": "18.3.0",
+    "@types/react-dom": "18.3.0",
+    "@vitejs/plugin-react": "4.3.1",
+    "esbuild": "0.21.5",
+    "miniflare": "3.20250718.3",
+    "typescript": "5.9.3",
+    "vite": "5.4.21",
+    "wrangler": "4.131.1"
+  }
+}

@@ -1,0 +1,3 @@
+# EC1 backend
+
+Read docs/architecture.md before implementing. Keep PlayFab immutable. New-account flows must make zero PlayFab requests. Use separate EC1 resources, credentials and token audiences. Full snapshots only; all save/grant/admin restore writers must use conditional staged publication. Preserve originals before comparison/import. No secrets or real player exports in Git. Local tests never contact production players. Never interpret a network/DB failure as account-not-found or invalid credentials. Feature modules own their state; route entry points only wire dependencies. Follow the root agent's path assignments when collaborating.
