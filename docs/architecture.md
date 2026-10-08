@@ -21,4 +21,4 @@ Read `E:/Epic Conquest/Epic Conquest 1/Epic_Conquest/docs/ec1-backend-migration-
 
 Keep actual Unity/cloud rollout separate from local compilation. Feature activation in the Unity client is gated until server/client integration checks pass; migrations need controlled legacy account/device checks. Provider credentials may be absent; unconfigured methods return actionable typed errors, never a PlayFab fallback. No user passwords/tokens/keys belong in commits or diagnostics.
 
-Versions are pinned to inspected EC2 baseline rather than claimed newest. Official runtime guidance checked 2026-10-09: https://hono.dev/docs/getting-started/cloudflare-workers, https://developers.cloudflare.com/d1/worker-api/d1-database/, https://developers.cloudflare.com/r2/api/workers/workers-api-reference/.
+Dependencies started from the inspected EC2 baseline and were then patched independently in EC1. See the exact lockfile and README dependency note. Official runtime guidance checked 2026-10-09: https://hono.dev/docs/getting-started/cloudflare-workers, https://developers.cloudflare.com/d1/worker-api/d1-database/, https://developers.cloudflare.com/r2/api/workers/workers-api-reference/.

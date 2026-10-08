@@ -4,6 +4,7 @@ account_id = "d458f7392f56bbf5e01154266a2f42b6"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
+preview_urls = false
 routes = [
   { pattern = "ec1mod.codezrv.com", custom_domain = true },
   { pattern = "ec1.gacogames.com", custom_domain = true },
@@ -23,6 +24,9 @@ PLAYFAB_TITLE_ID = "3BFE7"
 RECOVERY_ENABLED = "false"
 IAP_PURCHASES_ENABLED = "false"
 IAP_ALLOW_TEST_PURCHASES = "false"
+IAP_GOOGLE_PACKAGE_NAME = "com.gacogames.epiccon"
+IAP_APPLE_BUNDLE_ID = "com.gacogames.epiccon"
+IAP_APPLE_VERIFICATION_MODE = "receipt"
 MAIL_FROM = "noreply@gacogames.com"
 PASSWORD_RESET_ORIGIN = "https://ec1.gacogames.com"
 
@@ -52,7 +56,9 @@ bucket_name = "epicon1-legacy-archive"
 [env.staging]
 name = "epicon1-backend-staging"
 workers_dev = true
+preview_urls = false
 routes = []
+send_email = []
 [env.staging.assets]
 directory = "./dist"
 binding = "ASSETS"
@@ -65,7 +71,12 @@ LEGACY_MIGRATION_ENABLED = "false"
 RECOVERY_ENABLED = "false"
 IAP_PURCHASES_ENABLED = "false"
 IAP_ALLOW_TEST_PURCHASES = "false"
+IAP_GOOGLE_PACKAGE_NAME = "com.gacogames.epiccon"
+IAP_APPLE_BUNDLE_ID = "com.gacogames.epiccon"
+IAP_APPLE_VERIFICATION_MODE = "receipt"
 PLAYFAB_TITLE_ID = "3BFE7"
+MAIL_FROM = "noreply@gacogames.com"
+PASSWORD_RESET_ORIGIN = "https://epicon1-backend-staging.johanesnindyo.workers.dev"
 [env.staging.triggers]
 crons = ["0 * * * *"]
 [[env.staging.d1_databases]]

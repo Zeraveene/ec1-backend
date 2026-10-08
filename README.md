@@ -17,7 +17,7 @@ Run `npx wrangler d1 migrations apply epicon1-player-data-staging --env staging 
 | Save bucket | `epicon1-player-saves` | `epicon1-player-saves-staging` |
 | Audit bucket | `epicon1-audit-blobs` | `epicon1-audit-blobs-staging` |
 | Source archive bucket | `epicon1-legacy-archive` | `epicon1-legacy-archive-staging` |
-| Planned domains | `ec1mod.codezrv.com`, `ec1.gacogames.com` | Own workers.dev host; no inherited custom domains |
+| Live domains | `ec1mod.codezrv.com`, `ec1.gacogames.com` | `epicon1-backend-staging.johanesnindyo.workers.dev`; no inherited custom domains |
 
 All resources belong to the existing Cloudflare account. Signing secrets differ by environment and purpose. `secrets/` and `.dev.vars*` are ignored; they must never enter Git, dashboard assets or Unity player builds.
 
