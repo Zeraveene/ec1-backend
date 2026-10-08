@@ -42,9 +42,9 @@ Player search/detail, save revisions/restore, in-game mail, restrictions, daily 
 
 ## Remaining release gates
 
-The implementation and synthetic tests do not establish signed-device or store readiness. Complete the provider registrations/redirects, EC1 PlayFab server secret, store verification credentials and signed Android/iOS tests before enabling those features. Verify transactional email delivery before `RECOVERY_ENABLED=true`; tests never send real emails. Prove native creation → first save → app restart → same-profile sign-in on devices before enabling migration for returning players.
+The implementation and synthetic tests do not establish signed-device or store readiness. The EC1 PlayFab server secret is provisioned only in production; migration stays paused. Complete the provider registrations/redirects, store verification credentials and signed Android/iOS tests before enabling those features. Verify transactional email delivery before `RECOVERY_ENABLED=true`; tests never send real emails. Prove native creation → first save → app restart → same-profile sign-in on devices before enabling migration for returning players.
 
-See [auth protocol](docs/auth.md), [save and migration contract](docs/save-contract.md), and the Unity project's `docs/ec1-backend-migration-plan.md` and client handoff for detailed decisions and outstanding work.
+See the [implementation results and remaining gates](docs/overnight-results-2026-10-09.md), [auth protocol](docs/auth.md), [save and migration contract](docs/save-contract.md), and the Unity project's `docs/ec1-backend-migration-plan.md` and client handoff for detailed decisions and outstanding work.
 
 ## Dependency note
 
