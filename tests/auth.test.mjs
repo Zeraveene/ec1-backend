@@ -49,7 +49,7 @@ before(async () => {
   };
   const bundled = await build({
     stdin: {
-      contents: `import {Hono} from 'hono';import {createAuthApp,requirePlayer,mintMigrationSession,cleanupAuthState} from './src/auth/index';const app=new Hono();app.use('/api/auth/*',async(c,next)=>{c.env.ALLOW_NEW_ACCOUNTS=c.req.header('X-Test-Disable-Creation')==='true'?'false':'true';await next();});app.route('/api/auth',createAuthApp());app.get('/protected',requirePlayer,c=>c.json(c.get('player')));app.get('/api/game/readiness',requirePlayer,c=>c.json(c.get('player')));app.post('/test/cleanup',async c=>c.json(await cleanupAuthState(c.env,2)));app.post('/test/mint',async c=>c.json(await mintMigrationSession(c.env,(await c.req.json()).playerId,null)));app.onError((e,c)=>c.json({error:e.code||'auth_unavailable'},e.status||503));export default app;`,
+      contents: `import {Hono} from 'hono';import {createAuthApp,requirePlayer,mintMigrationSession,cleanupAuthState} from './src/auth/index';const app=new Hono();app.use('/api/auth/*',async(c,next)=>{c.env.ALLOW_NEW_ACCOUNTS=c.req.header('X-Test-Disable-Creation')==='true'?'false':'true';await next();});app.use('/api/auth/*',async(c,next)=>{const target=c.req.header('X-Test-Reset-Bootstrap');if(!target){await next();return;}const original=c.env.DB;let batches=0;c.env.DB={prepare:(...args)=>original.prepare(...args),batch:async statements=>{if(batches++===1){await original.prepare('DELETE FROM auth_bootstrap WHERE id=?').bind(target).run();}return original.batch(statements);}};try{await next();}finally{c.env.DB=original;}});app.route('/api/auth',createAuthApp());app.get('/protected',requirePlayer,c=>c.json(c.get('player')));app.get('/api/game/readiness',requirePlayer,c=>c.json(c.get('player')));app.post('/test/cleanup',async c=>c.json(await cleanupAuthState(c.env,2)));app.post('/test/mint',async c=>c.json(await mintMigrationSession(c.env,(await c.req.json()).playerId,null)));app.onError((e,c)=>c.json({error:e.code||'auth_unavailable'},e.status||503));export default app;`,
       resolveDir: process.cwd(),
     },
     bundle: true,
@@ -454,6 +454,126 @@ test("fresh guest retries resolve one canonical backend-only profile without sav
     ).error,
     "bootstrap_conflict",
   );
+});
+
+test("expired creation bootstrap cannot recreate cleaned sessions or refresh proof; first-create reset race cannot publish a session", async () => {
+  const input = boot("expired-bootstrap-acknowledgment"),
+    created = await request("/api/auth/guest", input),
+    before = requests.length;
+  assert.equal(created.status, 200);
+  await db
+    .prepare("UPDATE auth_bootstrap SET created_at=? WHERE id=?")
+    .bind(Math.floor(Date.now() / 1000) - 121, input.bootstrapId)
+    .run();
+  // Expiry blocks retries even before housekeeping removes the original session.
+  assert.equal(
+    (await request("/api/auth/guest", input)).error,
+    "bootstrap_retry_expired",
+  );
+  await db
+    .prepare("UPDATE auth_session SET expires_at=-1 WHERE player_id=?")
+    .bind(created.playerId)
+    .run();
+  await db
+    .prepare(
+      "UPDATE auth_refresh SET expires_at=-1 WHERE session_id IN(SELECT id FROM auth_session WHERE player_id=?)",
+    )
+    .bind(created.playerId)
+    .run();
+  await request("/test/cleanup", {});
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT COUNT(*) n FROM auth_session WHERE player_id=?")
+        .bind(created.playerId)
+        .first()
+    ).n,
+    0,
+  );
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT COUNT(*) n FROM auth_bootstrap WHERE id=?")
+        .bind(input.bootstrapId)
+        .first()
+    ).n,
+    1,
+  );
+  assert.equal(
+    (await request("/api/auth/guest", input)).error,
+    "bootstrap_retry_expired",
+  );
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT COUNT(*) n FROM auth_session WHERE player_id=?")
+        .bind(created.playerId)
+        .first()
+    ).n,
+    0,
+  );
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT COUNT(*) n FROM auth_refresh WHERE hash=?")
+        .bind(
+          b64(
+            new Uint8Array(
+              await webcrypto.subtle.digest(
+                "SHA-256",
+                new TextEncoder().encode(created.refreshToken),
+              ),
+            ),
+          ),
+        )
+        .first()
+    ).n,
+    0,
+  );
+
+  const raced = boot("reset-before-initial-session"),
+    response = await mf.dispatchFetch("https://ec1.local/api/auth/guest", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Test-Reset-Bootstrap": raced.bootstrapId,
+      },
+      body: JSON.stringify(raced),
+    });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "bootstrap_retry_expired");
+  const owner = await db
+    .prepare(
+      "SELECT player_id FROM auth_identity WHERE provider='guest' AND subject=?",
+    )
+    .bind(
+      b64(
+        new Uint8Array(
+          await webcrypto.subtle.digest(
+            "SHA-256",
+            new TextEncoder().encode(
+              `${raced.bootstrapId}/${raced.bootstrapSecret}`,
+            ),
+          ),
+        ),
+      ),
+    )
+    .first();
+  assert.ok(owner);
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT COUNT(*) n FROM auth_session WHERE player_id=?")
+        .bind(owner.player_id)
+        .first()
+    ).n,
+    0,
+  );
+  assert.equal(
+    (await request("/api/auth/guest", raced)).error,
+    "identity_already_registered",
+  );
+  assert.equal(requests.length, before);
 });
 test("email create retries, duplicate identity races, signin and no-save readiness", async () => {
   const input = {

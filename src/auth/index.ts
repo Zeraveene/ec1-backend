@@ -12,7 +12,7 @@ import {
   verifyToken,
 } from "./crypto";
 import { AuthError, providerProof } from "./providers";
-import { rateLimit } from "./maintenance";
+import { bootstrapAcknowledgementWindow, rateLimit } from "./maintenance";
 import {
   activeDeviceSession,
   credentialOwner,
@@ -34,6 +34,11 @@ interface Session {
   revoked_at: number | null;
 }
 const lifetime = 30 * 86400;
+interface BootstrapProof {
+  id: string;
+  secretHash: string;
+  fingerprint: string;
+}
 const stmt = (env: Env, sql: string, ...values: unknown[]) =>
   env.DB.prepare(sql).bind(...values);
 async function active(env: Env, id: string): Promise<void> {
@@ -123,6 +128,7 @@ async function openSession(
   deviceId: string | null,
   seed?: string,
   device?: DeviceCredential,
+  bootstrap?: BootstrapProof,
 ) {
   await active(env, playerId);
   const id = seed
@@ -147,23 +153,53 @@ async function openSession(
           device.secretHash,
           device.deviceId,
         )
+      : bootstrap
+        ? stmt(
+            env,
+            "INSERT OR IGNORE INTO auth_session(id,player_id,provider,device_id,created_at,expires_at) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM auth_bootstrap WHERE id=? AND player_id=? AND secret_hash=? AND fingerprint=? AND created_at>=? AND created_at<=?)",
+            id,
+            playerId,
+            provider,
+            deviceId,
+            now(),
+            now() + lifetime,
+            bootstrap.id,
+            playerId,
+            bootstrap.secretHash,
+            bootstrap.fingerprint,
+            now() - bootstrapAcknowledgementWindow,
+            now(),
+          )
+        : stmt(
+            env,
+            "INSERT OR IGNORE INTO auth_session(id,player_id,provider,device_id,created_at,expires_at) VALUES(?,?,?,?,?,?)",
+            id,
+            playerId,
+            provider,
+            deviceId,
+            now(),
+            now() + lifetime,
+          ),
+    bootstrap
+      ? stmt(
+          env,
+          "INSERT OR IGNORE INTO auth_refresh(hash,session_id,expires_at) SELECT ?,s.id,? FROM auth_session s WHERE s.id=? AND EXISTS(SELECT 1 FROM auth_bootstrap b WHERE b.id=? AND b.player_id=s.player_id AND b.secret_hash=? AND b.fingerprint=? AND b.created_at>=? AND b.created_at<=?)",
+          await hash(refresh),
+          now() + lifetime,
+          id,
+          bootstrap.id,
+          bootstrap.secretHash,
+          bootstrap.fingerprint,
+          now() - bootstrapAcknowledgementWindow,
+          now(),
+        )
       : stmt(
           env,
-          "INSERT OR IGNORE INTO auth_session(id,player_id,provider,device_id,created_at,expires_at) VALUES(?,?,?,?,?,?)",
-          id,
-          playerId,
-          provider,
-          deviceId,
-          now(),
+          "INSERT OR IGNORE INTO auth_refresh(hash,session_id,expires_at) SELECT ?,id,? FROM auth_session WHERE id=?",
+          await hash(refresh),
           now() + lifetime,
+          id,
         ),
-    stmt(
-      env,
-      "INSERT OR IGNORE INTO auth_refresh(hash,session_id,expires_at) SELECT ?,id,? FROM auth_session WHERE id=?",
-      await hash(refresh),
-      now() + lifetime,
-      id,
-    ),
   ]);
   const session = await stmt(
     env,
@@ -175,6 +211,23 @@ async function openSession(
     "SELECT consumed_at FROM auth_refresh WHERE hash=?",
     await hash(refresh),
   ).first<{ consumed_at: number | null }>();
+  // Recheck after conditional session publication too: a password reset may consume
+  // this bootstrap between the INSERT and response signing. Recovery revokes the
+  // winning account's sessions and deletes its bootstraps in one D1 transaction.
+  if (
+    bootstrap &&
+    !(await stmt(
+      env,
+      "SELECT 1 FROM auth_bootstrap WHERE id=? AND player_id=? AND secret_hash=? AND fingerprint=? AND created_at>=? AND created_at<=?",
+      bootstrap.id,
+      playerId,
+      bootstrap.secretHash,
+      bootstrap.fingerprint,
+      now() - bootstrapAcknowledgementWindow,
+      now(),
+    ).first())
+  )
+    throw new AuthError("bootstrap_retry_expired", 409);
   if (!session && device)
     throw new AuthError("invalid_device_credentials", 401);
   if (
@@ -286,6 +339,8 @@ async function create(
       provider,
       typeof b.deviceId === "string" ? b.deviceId : null,
       `${bootstrapId}/${secret}`,
+      undefined,
+      { id: bootstrapId, secretHash, fingerprint },
     );
   }
   const id = `EC1X${(await hash(random()))
@@ -336,6 +391,8 @@ async function create(
         provider,
         typeof b.deviceId === "string" ? b.deviceId : null,
         `${bootstrapId}/${secret}`,
+        undefined,
+        { id: bootstrapId, secretHash, fingerprint },
       );
     if (retry) throw new AuthError("bootstrap_conflict", 409);
     if (
@@ -365,6 +422,8 @@ async function create(
     provider,
     typeof b.deviceId === "string" ? b.deviceId : null,
     `${bootstrapId}/${secret}`,
+    undefined,
+    { id: bootstrapId, secretHash, fingerprint },
   );
 }
 export function createAuthApp() {

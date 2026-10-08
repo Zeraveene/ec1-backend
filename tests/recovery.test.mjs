@@ -98,7 +98,7 @@ test("unknown and known recovery requests return generic acceptance; stored toke
     1,
   );
 });
-test("password reset revokes old session, preserves player, retries same operation and rejects changed replay", async () => {
+test("password reset revokes sessions, device and bootstrap proofs; preserves player and rejects changed replay", async () => {
   const message = await db
       .prepare("SELECT body FROM fixture_message ORDER BY rowid DESC LIMIT 1")
       .first(),
@@ -147,6 +147,29 @@ test("password reset revokes old session, preserves player, retries same operati
         .first()
     ).revoked_at,
   );
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT COUNT(*) n FROM auth_bootstrap WHERE player_id=?")
+        .bind(session.playerId)
+        .first()
+    ).n,
+    0,
+  );
+  // Simulate later auth housekeeping: old creation proof must not resurrect a session.
+  await db
+    .prepare(
+      "DELETE FROM auth_refresh WHERE session_id IN(SELECT id FROM auth_session WHERE player_id=?)",
+    )
+    .bind(session.playerId)
+    .run();
+  await db
+    .prepare("DELETE FROM auth_session WHERE player_id=?")
+    .bind(session.playerId)
+    .run();
+  const oldCreate = await req("/api/auth/register", input);
+  assert.equal(oldCreate.status, 409);
+  assert.equal(oldCreate.error, "identity_already_registered");
   const login = await req("/api/auth/login", {
     email: input.email,
     password: payload.password,

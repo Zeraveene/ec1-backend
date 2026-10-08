@@ -201,6 +201,9 @@ export function createRecoveryApp() {
         next,
       ),
       c.env.DB.prepare(
+        "DELETE FROM auth_bootstrap WHERE player_id=? AND EXISTS(SELECT 1 FROM password_recovery WHERE token_hash=? AND fingerprint=? AND used_at=?) AND EXISTS(SELECT 1 FROM auth_identity WHERE provider='email' AND player_id=? AND password_hash=?)",
+      ).bind(row.player_id, digest, fingerprint, time, row.player_id, next),
+      c.env.DB.prepare(
         "INSERT OR IGNORE INTO recovery_event(id,player_id,action,created_at) SELECT ?,?,'password.reset',? WHERE EXISTS(SELECT 1 FROM password_recovery WHERE token_hash=? AND fingerprint=? AND used_at=?) AND EXISTS(SELECT 1 FROM auth_identity WHERE provider='email' AND player_id=? AND password_hash=?)",
       ).bind(
         `reset:${digest}`,

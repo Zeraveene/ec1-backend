@@ -2,6 +2,9 @@ import type { Env } from "../env";
 import { hash, now } from "./crypto";
 import { AuthError } from "./providers";
 
+// Bootstrap proves a lost creation acknowledgement briefly; it is never a login credential.
+export const bootstrapAcknowledgementWindow = 120;
+
 /** Edge IP is supplied by Cloudflare, never a client-selected account identifier. */
 export async function rateLimit(
   env: Env,
