@@ -18,3 +18,11 @@ Staging deliberately has no admin authority binding or callback configuration. I
 The production moderation login lives at `ec1mod.codezrv.com`; `ec1.gacogames.com` remains a separate request origin and cannot initiate that origin-bound admin login.
 
 Cloudflare's [named RPC entrypoint documentation](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/rpc/) describes this private Worker-to-Worker boundary.
+
+## Verified deployment, 2026-10-09
+
+EC2 implementation commit `031a8fa` and EC1 implementation commit `7a59e5a` are on `codex/shared-admin-authority` in their respective repositories. EC2 deployed with existing remote variables retained; no signing or Discord secrets were copied or changed. Deployment versions: EC2 `9269c0c5-70bd-4a07-bb56-75f5cfad195e`, EC1 production `0ade4b3e-cda4-4984-8015-b4d2ed18c03b`, EC1 staging `49d32b3e-1b3f-4363-9232-cc74d49784e1`.
+
+EC1's full check passed 55 synthetic integration tests, strict TypeScript and the dashboard build. EC2 typecheck/build and actual private-RPC tests passed, covering live membership/removal, malformed IDs, lookup/provider failures, fixed callback scope and credential isolation. Live preflight passed at 09:21 Jakarta: EC1 and EC2 authorization redirects use the same public Discord app ID `1499961450536636617`; the EC1 redirect uses the exact moderation callback; unauthenticated admin access and alternate-origin login are rejected; staging admin remains closed and its player tokens cannot access production. EC1 production account creation, migration, purchases and recovery remain paused.
+
+The Discord portal's registered redirect list and a real authenticated sign-in have not been verified. Register the EC1 callback in that existing application, then sign in at `https://ec1mod.codezrv.com`. The reciprocal EC2 dashboard navigation link is now deployed too.

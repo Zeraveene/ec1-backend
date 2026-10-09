@@ -1,5 +1,7 @@
 # EC1 backend implementation handoff
 
+Follow-up at 09:21 Jakarta: EC1 admin authentication now uses EC2's live whitelist and existing Discord app through a private authority. Both deployments and reciprocal dashboard links are updated. The original overnight snapshot below remains historical; see `docs/shared-admin-auth.md` for the current admin setup, deployment versions and callback registration step.
+
 EC1 now has an independent backend repository at `E:/Epic Conquest/ec1-backend`, staging resources and a production preparation deployment under the existing Cloudflare account. The Unity client has an opt-in backend path. Returning players have not been migrated, and the shipping game's default backend flag remains off.
 
 The original EC1 plan was committed as `ffde4e36` before implementation. EC2 backend `6611622` and Unity `b457e3e2` were clean reference baselines. Backend scaffold `4304136` and foundation `4e0a86c` preserve the initial implementation checkpoints; the complete backend implementation is `c577ae2`, followed by creation-proof expiry/recovery hardening in `4ffff18`. EC1 client implementation is committed as `59645e09` on `codex/ec1-backend-migration`; the reciprocal EC2 dashboard link is committed as `fc036ef` on `codex/ec1-moderation-link`.
