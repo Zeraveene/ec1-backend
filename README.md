@@ -36,7 +36,7 @@ All resources belong to the existing Cloudflare account. Signing secrets differ 
 
 ## Administration
 
-Dashboard uses its own Discord OAuth app configuration, EC1 allowlist and secret. Sessions and one-use states are stored in D1; logout revokes the session. Writes require exact Origin, and every consequential admin write has a transactional audit. Missing configuration fails closed.
+Dashboard uses EC2's Discord admin app and live admin authority through the private `AdminAuthority` Worker service binding. The authority checks EC2's bootstrap IDs plus its D1 `admin_whitelist`; EC1 rechecks membership on every admin request. Discord credentials remain in EC2. EC1 retains its own signing secret, cookie, audience, D1 sessions and one-use OAuth state; logout revokes the session. Writes require exact Origin, and every consequential admin write has a transactional audit. Missing or unavailable authority fails closed. Staging admin access stays unconfigured. See [shared admin setup](docs/shared-admin-auth.md).
 
 Player search/detail, save revisions/restore, in-game mail, restrictions, daily rewards, coupons and audit history are implemented. EC1 links to EC2. A reciprocal source change is prepared in the EC2 dashboard; its production deployment remains separate.
 

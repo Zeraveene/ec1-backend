@@ -8,7 +8,7 @@ let mf,
   db,
   adminCookie,
   guest,
-  providerUser = "111111",
+  providerUser = "111111111111111111",
   requests = [];
 const origin = "https://ec1.local",
   secret = "synthetic-admin-secret-at-least-thirty-two-chars";
@@ -28,7 +28,7 @@ async function signed(payload) {
   return `${body}.${Buffer.from(await webcrypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))).toString("base64url")}`;
 }
 before(async () => {
-  const contents = `import {Hono} from 'hono';import {createAuthApp} from './src/auth';import {createAdminApp,createAdminAuthApp,cleanupAdminState} from './src/admin';import {publishSnapshot} from './src/game';import {nativeKeys} from './src/game/validation';const app=new Hono();app.route('/api/auth',createAuthApp());app.route('/auth',createAdminAuthApp());app.route('/api/admin',createAdminApp());app.post('/test/cleanup',async c=>c.json(await cleanupAdminState(c.env,2)));app.post('/test/publish',async c=>{const b=await c.req.json(),prefs=Object.fromEntries(nativeKeys.map(k=>[k,'0'])),attributes=JSON.stringify({level:1,exp:0,s_top:'',s_glove:'',s_shoes:'',s_weapon:''});Object.assign(prefs,{alaster_attributes:attributes,edna_attributes:attributes,louisa_attributes:'',soul_attributes:'',gamedata:JSON.stringify({gold:0,ruby:0,stageProgress:b.progress,tutorialProgress:0,timeCounter:b.time,usedCoupons:[],stageInfo:[]}),inventory:'^^',consumable:'',LastRewardTime:'',selected:'alaster',achievements_new:Array(27).fill('0').join('|'),lbId:'',lbName:''});return c.json(await publishSnapshot(c.env,b.playerId,{game:'ec1',schemaVersion:1,playtime:b.time,data:{CLOUD_ALL_DATA:JSON.stringify(prefs),Playtime:String(b.time)},expectedSaveVersion:b.version,operationId:b.operationId,intent:'new_game'}));});app.onError((e,c)=>c.json({error:e.code||'error'},e.status||503));export default app;`;
+  const contents = `import {Hono} from 'hono';import {createAuthApp} from './src/auth';import {createAdminApp,createAdminAuthApp,cleanupAdminState} from './src/admin';import {publishSnapshot} from './src/game';import {nativeKeys} from './src/game/validation';const app=new Hono();app.route('/api/auth',createAuthApp());app.route('/auth',createAdminAuthApp());app.route('/api/admin',createAdminApp());app.post('/test/cleanup',async c=>c.json(await cleanupAdminState(c.env,2)));app.post('/test/publish',async c=>{const b=await c.req.json(),prefs=Object.fromEntries(nativeKeys.map(k=>[k,'0'])),attributes=JSON.stringify({level:1,exp:0,s_top:'',s_glove:'',s_shoes:'',s_weapon:''});Object.assign(prefs,{alaster_attributes:attributes,edna_attributes:attributes,louisa_attributes:'',soul_attributes:'',gamedata:JSON.stringify({gold:0,ruby:0,stageProgress:b.progress,tutorialProgress:0,timeCounter:b.time,usedCoupons:[],stageInfo:[]}),inventory:'^^',consumable:'',LastRewardTime:'',selected:'alaster',achievements_new:Array(27).fill('0').join('|'),lbId:'',lbName:''});return c.json(await publishSnapshot(c.env,b.playerId,{game:'ec1',schemaVersion:1,playtime:b.time,data:{CLOUD_ALL_DATA:JSON.stringify(prefs),Playtime:String(b.time)},expectedSaveVersion:b.version,operationId:b.operationId,intent:'new_game'}));});app.onError((e,c)=>c.json({error:e.code||'error'},e.status||503));export default {fetch(request,env,ctx){return app.fetch(request,{...env,ADMIN_AUTHORITY:{async getConfiguration(){return {configured:true,clientId:"333333333333333333"};},async exchangeIdentity(code,redirectUri){const token=await fetch("https://discord.com/api/oauth2/token",{method:"POST",body:new URLSearchParams({client_id:"333333333333333333",redirect_uri:redirectUri,code})});const identity=await fetch("https://discord.com/api/users/@me",{headers:{Authorization:"Bearer "+(await token.json()).access_token}});return identity.json();},async isAllowed(id){const control=await env.DB.prepare("SELECT value FROM test_authority_control").first();if(control.value==="unavailable")throw new Error("synthetic failure");if(control.value==="malformed")return "true";return !!(await env.DB.prepare("SELECT id FROM test_admin_authority WHERE id=?").bind(id).first());}}},ctx);}};`;
   const result = await build({
     stdin: { contents, resolveDir: process.cwd() },
     bundle: true,
@@ -48,16 +48,15 @@ before(async () => {
           "synthetic-player-signing-secret-at-least-32-chars",
         ALLOW_NEW_ACCOUNTS: "true",
         ADMIN_SESSION_SECRET: secret,
-        ADMIN_DISCORD_IDS: "111111",
-        DISCORD_ADMIN_CLIENT_ID: "admin-client-fixture",
-        DISCORD_ADMIN_CLIENT_SECRET: "admin-client-secret-fixture",
+        // Stale local allowlist must never override live remote removal/outage.
+        ADMIN_DISCORD_IDS: "111111111111111111",
         DISCORD_ADMIN_REDIRECT_URI: `${origin}/auth/discord/callback`,
       },
       outboundService: async (request) => {
         requests.push(request.url);
         if (request.url === "https://discord.com/api/oauth2/token") {
           const form = new URLSearchParams(await request.text());
-          assert.equal(form.get("client_id"), "admin-client-fixture");
+          assert.equal(form.get("client_id"), "333333333333333333");
           assert.equal(
             form.get("redirect_uri"),
             `${origin}/auth/discord/callback`,
@@ -95,6 +94,16 @@ before(async () => {
       .map((s) => s.trim())
       .filter(Boolean))
       await db.prepare(statement).run();
+  await db.prepare("CREATE TABLE test_authority_control(value TEXT)").run();
+  await db
+    .prepare("INSERT INTO test_authority_control VALUES ('available')")
+    .run();
+  await db
+    .prepare("CREATE TABLE test_admin_authority(id TEXT PRIMARY KEY)")
+    .run();
+  await db
+    .prepare("INSERT INTO test_admin_authority VALUES ('111111111111111111')")
+    .run();
   guest = await request(
     "/api/auth/guest",
     {
@@ -151,7 +160,7 @@ test("OAuth rejects invalid state without provider calls, allowlist rejects unau
   assert.equal(invalid.status, 403);
   assert.equal((await invalid.json()).error, "invalid_oauth_state");
   assert.equal(requests.length, outbound);
-  providerUser = "999999";
+  providerUser = "999999999999999999";
   const denied = await finish(pending);
   assert.equal(denied.status, 403);
   assert.equal((await denied.json()).error, "admin_not_allowed");
@@ -159,7 +168,7 @@ test("OAuth rejects invalid state without provider calls, allowlist rejects unau
   const replay = await finish(pending);
   assert.equal(replay.status, 403);
   assert.equal((await replay.json()).error, "invalid_oauth_state");
-  providerUser = "111111";
+  providerUser = "111111111111111111";
   const allowed = await finish(await start());
   assert.equal(allowed.status, 302);
   adminCookie = cookie(allowed, "ec1_admin");
@@ -167,13 +176,13 @@ test("OAuth rejects invalid state without provider calls, allowlist rejects unau
   assert.match(allowed.headers.get("set-cookie"), /HttpOnly/);
   assert.match(allowed.headers.get("set-cookie"), /Secure/);
   assert.match(allowed.headers.get("set-cookie"), /SameSite=Lax/);
-  assert.equal((await request("/api/admin/me")).admin.id, "111111");
+  assert.equal((await request("/api/admin/me")).admin.id, "111111111111111111");
 });
 test("admin rejects forged actor headers, EC2 purpose, wrong audience and player tokens; CSRF requires exact Origin", async () => {
   assert.equal(
     (
       await request("/api/admin/me", null, "GET", null, {
-        "X-Admin-ID": "111111",
+        "X-Admin-ID": "111111111111111111",
       })
     ).status,
     401,
@@ -258,7 +267,7 @@ test("mail concurrent/lost-response retries create one audited message and rejec
     await db.prepare("SELECT * FROM admin_audit WHERE action='mail.send'").all()
   ).results;
   assert.equal(audits.length, 1);
-  assert.equal(audits[0].actor_id, "111111");
+  assert.equal(audits[0].actor_id, "111111111111111111");
   assert.equal(audits[0].player_id, guest.playerId);
 });
 test("ban writes and config edits roll back if audit cannot commit", async () => {
@@ -323,7 +332,7 @@ test("ban writes and config edits roll back if audit cannot commit", async () =>
   const audit = await db
     .prepare("SELECT * FROM admin_audit WHERE action='ban.update'")
     .first();
-  assert.equal(audit.actor_id, "111111");
+  assert.equal(audit.actor_id, "111111111111111111");
   assert.equal(
     (
       await request(
@@ -448,6 +457,40 @@ test("restore publishes a new immutable revision and audit once, preserving orig
   );
   await db.prepare("DROP TRIGGER fail_restore_audit").run();
 });
+test("shared whitelist removal immediately denies existing sessions; outages fail closed without local fallback", async () => {
+  await db.prepare("DELETE FROM test_admin_authority").run();
+  assert.equal((await request("/api/admin/me")).status, 401);
+  assert.equal(
+    (
+      await request(
+        "/api/admin/players/" + guest.playerId + "/ban",
+        { reason: "denied" },
+        "POST",
+      )
+    ).status,
+    401,
+  );
+  const denied = await finish(await start());
+  assert.equal(denied.status, 403);
+  assert.equal(cookie(denied, "ec1_admin"), undefined);
+  await db
+    .prepare("INSERT INTO test_admin_authority VALUES ('111111111111111111')")
+    .run();
+  for (const value of ["unavailable", "malformed"]) {
+    await db
+      .prepare("UPDATE test_authority_control SET value=?")
+      .bind(value)
+      .run();
+    assert.equal((await request("/api/admin/me")).status, 503);
+    const callback = await finish(await start());
+    assert.equal(callback.status, 503);
+    assert.equal((await callback.json()).error, "admin_authority_unavailable");
+    assert.equal(cookie(callback, "ec1_admin"), undefined);
+  }
+  await db.prepare("UPDATE test_authority_control SET value='available'").run();
+  assert.equal((await request("/api/admin/me")).admin.id, "111111111111111111");
+});
+
 test("expired OAuth state fails, cleanup is bounded, and logout revokes stolen session cookie", async () => {
   const pending = await start();
   await db
@@ -460,7 +503,7 @@ test("expired OAuth state fails, cleanup is bounded, and logout revokes stolen s
       .prepare(
         "INSERT INTO admin_session(id,actor_id,expires_at) VALUES(?,?,1)",
       )
-      .bind(`expired-admin-${i}`, "111111")
+      .bind(`expired-admin-${i}`, "111111111111111111")
       .run();
   await request("/test/cleanup", {}, "POST");
   assert.equal(

@@ -55,3 +55,12 @@ test("unknown API routes remain JSON404 and disabled creation/migration do not f
   );
   assert.equal((await health.json()).migrationEnabled, false);
 });
+test("absent shared authority keeps staging admin login and APIs closed", async () => {
+  for (const path of ["/auth/discord", "/api/admin/me"]) {
+    const response = await mf.dispatchFetch(
+      `https://ec1.fixture.invalid${path}`,
+    );
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error, "admin_not_configured");
+  }
+});

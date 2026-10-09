@@ -7,6 +7,20 @@ const targets = [
   "https://epicon1-backend.johanesnindyo.workers.dev",
 ];
 const evidence = [];
+const ec2Login = await fetch("https://ec2mod.codezrv.com/auth/discord/login", {
+  redirect: "manual",
+  signal: AbortSignal.timeout(20000),
+});
+assert.equal(ec2Login.status, 302);
+const ec2Authorize = new URL(ec2Login.headers.get("Location"));
+assert.equal(ec2Authorize.origin, "https://discord.com");
+assert.equal(ec2Authorize.pathname, "/api/oauth2/authorize");
+const sharedAdminClientId = ec2Authorize.searchParams.get("client_id");
+assert.match(sharedAdminClientId, /^\d{17,20}$/);
+assert.equal(
+  ec2Authorize.searchParams.get("redirect_uri"),
+  "https://ec2mod.codezrv.com/auth/discord/callback",
+);
 for (const origin of targets) {
   const response = await fetch(`${origin}/api/health`, {
     signal: AbortSignal.timeout(20000),
@@ -30,8 +44,29 @@ for (const origin of targets) {
   assert.equal(blocked.status, 403);
   assert.equal((await blocked.json()).error, "new_accounts_disabled");
   const admin = await fetch(`${origin}/api/admin/me`);
-  assert.equal(admin.status, 503);
-  assert.equal((await admin.json()).error, "admin_not_configured");
+  assert.equal(admin.status, 401);
+  assert.equal((await admin.json()).error, "admin_unauthorized");
+  const adminLogin = await fetch(`${origin}/auth/discord`, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(20000),
+  });
+  if (origin === "https://ec1mod.codezrv.com") {
+    assert.equal(adminLogin.status, 302);
+    const authorize = new URL(adminLogin.headers.get("Location"));
+    assert.equal(authorize.origin, "https://discord.com");
+    assert.equal(authorize.pathname, "/oauth2/authorize");
+    assert.equal(authorize.searchParams.get("client_id"), sharedAdminClientId);
+    assert.equal(
+      authorize.searchParams.get("redirect_uri"),
+      `${origin}/auth/discord/callback`,
+    );
+    assert.equal(authorize.searchParams.get("scope"), "identify");
+    assert.equal(authorize.searchParams.get("response_type"), "code");
+    assert.ok(authorize.searchParams.get("state"));
+  } else {
+    assert.equal(adminLogin.status, 503);
+    assert.equal((await adminLogin.json()).error, "admin_redirect_mismatch");
+  }
   const recovery = await fetch(`${origin}/api/recovery/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -53,7 +88,10 @@ for (const origin of targets) {
       "migration paused",
       "purchases paused",
       "recovery email paused",
-      "unconfigured admin closed",
+      "unauthenticated admin denied",
+      origin === "https://ec1mod.codezrv.com"
+        ? "same EC2 Discord admin app and exact EC1 callback"
+        : "admin OAuth rejects alternate origin",
       "SPA assets available",
       "security headers present",
     ],
@@ -65,6 +103,14 @@ const local = JSON.parse(
     "utf8",
   ),
 );
+for (const path of ["/api/admin/me", "/auth/discord"]) {
+  const stagingAdmin = await fetch(`${local.origin}${path}`, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(20000),
+  });
+  assert.equal(stagingAdmin.status, 503);
+  assert.equal((await stagingAdmin.json()).error, "admin_not_configured");
+}
 const signed = await fetch(`${local.origin}/api/auth/login`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -83,6 +129,8 @@ await mkdir(new URL("../output/", import.meta.url), { recursive: true });
 const result = {
   checkedAt: new Date().toISOString(),
   production: evidence,
+  sharedDiscordAdminClientId: sharedAdminClientId,
+  stagingAdmin: "Unconfigured and closed",
   environmentIsolation: "Staging tokens rejected on all production hosts",
 };
 await writeFile(

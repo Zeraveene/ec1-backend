@@ -29,6 +29,12 @@ IAP_APPLE_BUNDLE_ID = "com.gacogames.epiccon"
 IAP_APPLE_VERIFICATION_MODE = "receipt"
 MAIL_FROM = "noreply@gacogames.com"
 PASSWORD_RESET_ORIGIN = "https://ec1.gacogames.com"
+DISCORD_ADMIN_REDIRECT_URI = "https://ec1mod.codezrv.com/auth/discord/callback"
+
+[[services]]
+binding = "ADMIN_AUTHORITY"
+service = "epicon2-moderation-tool"
+entrypoint = "AdminAuthority"
 
 [triggers]
 crons = ["0 * * * *"]

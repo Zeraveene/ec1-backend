@@ -69,22 +69,26 @@ async function unseal(
     return null;
   }
 }
-function allowlisted(env: Env, id: string) {
-  return (env.ADMIN_DISCORD_IDS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .includes(id);
+async function allowlisted(env: Env, id: string) {
+  // Never fall back to a copied local list or cached membership when EC2 is
+  // unavailable. Existing EC1 sessions lose access on the next request.
+  if (!env.ADMIN_AUTHORITY) throw new AdminError("admin_not_configured", 503);
+  try {
+    const allowed = await env.ADMIN_AUTHORITY.isAllowed(id);
+    if (typeof allowed !== "boolean")
+      throw new Error("invalid_authority_response");
+    return allowed;
+  } catch {
+    throw new AdminError("admin_authority_unavailable", 503);
+  }
 }
 function configured(env: Env) {
   return !!(
     env.ADMIN_SESSION_SECRET &&
     env.ADMIN_SESSION_SECRET.length >= 32 &&
     env.ADMIN_SESSION_SECRET !== env.PLAYER_TOKEN_SECRET &&
-    env.DISCORD_ADMIN_CLIENT_ID &&
-    env.DISCORD_ADMIN_CLIENT_SECRET &&
     env.DISCORD_ADMIN_REDIRECT_URI &&
-    env.ADMIN_DISCORD_IDS
+    env.ADMIN_AUTHORITY
   );
 }
 const cookieOptions = {
@@ -105,9 +109,10 @@ const requireAdmin = createMiddleware<AppEnv>(async (c, next) => {
     session.iss !== "ec1-admin" ||
     session.aud !== new URL(c.req.url).origin ||
     typeof session.sid !== "string" ||
-    typeof session.id !== "string" ||
-    !allowlisted(c.env, session.id)
+    typeof session.id !== "string"
   )
+    return c.json({ error: "admin_unauthorized" }, 401);
+  if (!(await allowlisted(c.env, session.id)))
     return c.json({ error: "admin_unauthorized" }, 401);
   const stored = await c.env.DB.prepare(
     "SELECT actor_id,expires_at,revoked_at FROM admin_session WHERE id=?",
@@ -209,6 +214,17 @@ export function createAdminAuthApp() {
       new URL(c.req.url).origin
     )
       throw new AdminError("admin_redirect_mismatch", 503);
+    let configuration;
+    try {
+      configuration = await c.env.ADMIN_AUTHORITY!.getConfiguration();
+    } catch {
+      throw new AdminError("admin_authority_unavailable", 503);
+    }
+    if (
+      configuration.configured !== true ||
+      !/^\d{17,20}$/.test(configuration.clientId || "")
+    )
+      throw new AdminError("admin_not_configured", 503);
     await rateLimit(
       c.env,
       "admin-oauth",
@@ -235,7 +251,7 @@ export function createAdminAuthApp() {
     );
     const url = new URL("https://discord.com/oauth2/authorize");
     url.search = new URLSearchParams({
-      client_id: c.env.DISCORD_ADMIN_CLIENT_ID!,
+      client_id: configuration.clientId!,
       redirect_uri: c.env.DISCORD_ADMIN_REDIRECT_URI!,
       response_type: "code",
       scope: "identify",
@@ -265,35 +281,38 @@ export function createAdminAuthApp() {
     if (!consumed.meta.changes)
       throw new AdminError("invalid_oauth_state", 403);
     const code = string(c.req.query("code"), 2048);
-    const response = await fetch("https://discord.com/api/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: c.env.DISCORD_ADMIN_CLIENT_ID!,
-        client_secret: c.env.DISCORD_ADMIN_CLIENT_SECRET!,
-        redirect_uri: c.env.DISCORD_ADMIN_REDIRECT_URI!,
+    let user;
+    try {
+      user = await c.env.ADMIN_AUTHORITY!.exchangeIdentity(
         code,
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) throw new AdminError("oauth_exchange_failed", 502);
-    const token = (await response.json()) as { access_token?: string };
-    if (!token.access_token) throw new AdminError("oauth_exchange_failed", 502);
-    const userResponse = await fetch("https://discord.com/api/users/@me", {
-      headers: { Authorization: `Bearer ${token.access_token}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!userResponse.ok) throw new AdminError("oauth_identity_failed", 502);
-    const user = (await userResponse.json()) as {
-      id: string;
-      username: string;
-      global_name?: string;
-    };
-    if (!allowlisted(c.env, user.id))
-      throw new AdminError("admin_not_allowed", 403);
-    if (typeof user.id !== "string" || typeof user.username !== "string")
+        c.env.DISCORD_ADMIN_REDIRECT_URI!,
+      );
+    } catch {
+      throw new AdminError("admin_authority_unavailable", 503);
+    }
+    if (user.error) {
+      const errors: Record<string, number> = {
+        admin_redirect_mismatch: 503,
+        admin_not_configured: 503,
+        invalid_oauth_code: 400,
+        oauth_exchange_failed: 502,
+        oauth_identity_failed: 502,
+        admin_authority_unavailable: 503,
+      };
+      const known = Object.hasOwn(errors, user.error);
+      throw new AdminError(
+        known ? user.error : "admin_authority_unavailable",
+        known ? errors[user.error] : 503,
+      );
+    }
+    if (
+      typeof user.id !== "string" ||
+      !/^\d{17,20}$/.test(user.id) ||
+      typeof user.username !== "string"
+    )
       throw new AdminError("oauth_identity_failed", 502);
+    if (!(await allowlisted(c.env, user.id)))
+      throw new AdminError("admin_not_allowed", 403);
     const sid = crypto.randomUUID(),
       expires = Date.now() + 8 * 3600000;
     await c.env.DB.prepare(

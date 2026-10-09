@@ -17,9 +17,22 @@ export interface Env {
   IAP_ALLOW_TEST_PURCHASES?: string;
   PLAYER_TOKEN_SECRET: string;
   ADMIN_SESSION_SECRET?: string;
-  ADMIN_DISCORD_IDS?: string;
-  DISCORD_ADMIN_CLIENT_ID?: string;
-  DISCORD_ADMIN_CLIENT_SECRET?: string;
+  ADMIN_AUTHORITY?: {
+    isAllowed(discordId: string): Promise<boolean>;
+    getConfiguration(): Promise<{ configured: boolean; clientId?: string }>;
+    exchangeIdentity(
+      code: string,
+      redirectUri: string,
+    ): Promise<
+      | {
+          id: string;
+          username: string;
+          global_name: string | null;
+          error?: never;
+        }
+      | { error: string; id?: never; username?: never; global_name?: never }
+    >;
+  };
   DISCORD_ADMIN_REDIRECT_URI?: string;
   GOOGLE_CLIENT_IDS?: string;
   APPLE_CLIENT_IDS?: string;
