@@ -35,6 +35,9 @@ export interface Env {
   };
   DISCORD_ADMIN_REDIRECT_URI?: string;
   GOOGLE_CLIENT_IDS?: string;
+  GOOGLE_EDITOR_CLIENT_ID?: string;
+  GOOGLE_EDITOR_CLIENT_SECRET?: string;
+  GOOGLE_EDITOR_REDIRECT_URIS?: string;
   APPLE_CLIENT_IDS?: string;
   DISCORD_GAME_CLIENT_ID?: string;
   DISCORD_GAME_CLIENT_SECRET?: string;

@@ -13,6 +13,7 @@ let mf,
   key,
   requests = [],
   providerUnavailable = false,
+  editorIdToken = "",
   legacyMismatch = false;
 const secret = "local-synthetic-player-secret-at-least-32-characters";
 const b64 = (v) =>
@@ -68,7 +69,11 @@ before(async () => {
         ALLOW_NEW_ACCOUNTS: "true",
         LEGACY_MIGRATION_ENABLED: "true",
         PLAYFAB_TITLE_ID: "SYNTHETIC",
-        GOOGLE_CLIENT_IDS: "ec1-google-fixture",
+        GOOGLE_CLIENT_IDS: "ec1-google-fixture,ec1-editor-fixture",
+        GOOGLE_EDITOR_CLIENT_ID: "ec1-editor-fixture",
+        GOOGLE_EDITOR_CLIENT_SECRET: "synthetic-editor-secret",
+        GOOGLE_EDITOR_REDIRECT_URIS:
+          "http://127.0.0.1:18081/oauth/google/callback",
         DISCORD_GAME_CLIENT_ID: "fixture-client",
         DISCORD_GAME_CLIENT_SECRET: "synthetic-discord-secret",
         DISCORD_GAME_REDIRECT_URIS: "ec1fixture://discord",
@@ -79,6 +84,20 @@ before(async () => {
           return new Response("fixture outage", { status: 503 });
         if (request.url === "https://www.googleapis.com/oauth2/v3/certs")
           return new Response(JSON.stringify({ keys: [jwk] }));
+        if (request.url === "https://oauth2.googleapis.com/token") {
+          const form = new URLSearchParams(await request.text());
+          assert.equal(form.get("client_id"), "ec1-editor-fixture");
+          assert.equal(form.get("client_secret"), "synthetic-editor-secret");
+          assert.equal(
+            form.get("code_verifier"),
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq",
+          );
+          assert.equal(
+            form.get("redirect_uri"),
+            "http://127.0.0.1:18081/oauth/google/callback",
+          );
+          return new Response(JSON.stringify({ id_token: editorIdToken }));
+        }
         if (request.url === "https://discord.com/api/oauth2/token") {
           const form = new URLSearchParams(await request.text());
           assert.equal(
@@ -742,6 +761,95 @@ test("provider proofs require issuer/audience/nonce; explicit signin never creat
       (url) => url === "https://www.googleapis.com/oauth2/v3/certs",
     ),
   );
+});
+test("Editor Google code flow binds PKCE/state/nonce/audience and replays create without PlayFab", async () => {
+  const start = requests.length;
+  const verifier = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq";
+  const challengeHash = b64(
+    new Uint8Array(
+      await webcrypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(verifier),
+      ),
+    ),
+  );
+  const redirectUri = "http://127.0.0.1:18081/oauth/google/callback";
+  const challenge = await request("/api/auth/provider/google/challenge", {
+    intent: "create",
+    redirectUri,
+    codeChallenge: challengeHash,
+  });
+  assert.equal(challenge.status, 200);
+  const authorize = new URL(challenge.authorizeUrl);
+  assert.equal(authorize.origin, "https://accounts.google.com");
+  assert.equal(authorize.searchParams.get("client_id"), "ec1-editor-fixture");
+  assert.equal(authorize.searchParams.get("nonce"), challenge.nonce);
+  assert.equal(authorize.searchParams.get("code_challenge"), challengeHash);
+  const proof = {
+    intent: "create",
+    challengeId: challenge.challengeId,
+    state: challenge.state,
+    code: "synthetic-code",
+    codeVerifier: verifier,
+    redirectUri,
+    ...boot("editor-google"),
+  };
+  for (const wrong of [
+    { state: "stale" },
+    { codeVerifier: verifier + "X" },
+    { redirectUri: redirectUri + "/wrong" },
+  ]) {
+    assert.equal(
+      (await request("/api/auth/provider/google", { ...proof, ...wrong }))
+        .error,
+      "invalid_state_or_pkce",
+    );
+  }
+  assert.equal(requests.length, start);
+  const claims = {
+    iss: "https://accounts.google.com",
+    aud: "ec1-editor-fixture",
+    sub: "synthetic-editor-google",
+    nonce: challenge.nonce,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  };
+  for (const wrong of [{ nonce: "stale" }, { aud: "ec1-google-fixture" }]) {
+    editorIdToken = await token({ ...claims, ...wrong });
+    assert.equal(
+      (await request("/api/auth/provider/google", proof)).error,
+      "invalid_provider_proof",
+    );
+  }
+  editorIdToken = await token(claims);
+  const created = await request("/api/auth/provider/google", proof);
+  assert.equal(created.status, 200);
+  assert.equal(created.saveState, "native_uninitialized");
+  const exchanged = requests.length;
+  const replay = await request("/api/auth/provider/google", proof);
+  assert.equal(replay.playerId, created.playerId);
+  assert.equal(requests.length, exchanged);
+  assert.equal(
+    (await request("/api/auth/provider/google", { ...proof, code: "altered" }))
+      .error,
+    "invalid_or_used_challenge",
+  );
+  assert.ok(
+    requests
+      .slice(start)
+      .every((url) =>
+        [
+          "https://oauth2.googleapis.com/token",
+          "https://www.googleapis.com/oauth2/v3/certs",
+        ].includes(url),
+      ),
+  );
+  const missing = await request("/api/auth/provider/google/challenge", {
+    intent: "signin",
+    redirectUri: "http://127.0.0.1:18099/wrong",
+    codeChallenge: challengeHash,
+  });
+  assert.equal(missing.error, "invalid_redirect_or_pkce");
 });
 test("guest email link becomes recoverable; last durable method cannot be unlinked; logout and bans enforce sessions", async () => {
   const guest = await request("/api/auth/guest", boot("linked-guest"));

@@ -14,6 +14,65 @@ export async function providerProof(
   input: Record<string, unknown>,
   nonce: string,
 ): Promise<string> {
+  let exchangedGoogleCode = false;
+  // Editor code flow exchanges only on the server, then uses the same signed JWT,
+  // audience and per-attempt nonce verification as the native Google path.
+  if (provider === "google" && input.code != null) {
+    if (
+      !env.GOOGLE_EDITOR_CLIENT_ID ||
+      !env.GOOGLE_EDITOR_CLIENT_SECRET ||
+      !env.GOOGLE_CLIENT_IDS?.split(",")
+        .map((s) => s.trim())
+        .includes(env.GOOGLE_EDITOR_CLIENT_ID)
+    )
+      throw new AuthError("provider_not_configured", 503);
+    if (
+      typeof input.code !== "string" ||
+      !input.code ||
+      input.code.length > 4096 ||
+      typeof input.codeVerifier !== "string" ||
+      !/^[A-Za-z0-9._~-]{43,128}$/.test(input.codeVerifier) ||
+      typeof input.redirectUri !== "string" ||
+      !env.GOOGLE_EDITOR_REDIRECT_URIS?.split(",")
+        .map((s) => s.trim())
+        .includes(input.redirectUri)
+    )
+      throw new AuthError("invalid_provider_proof", 401);
+    let response: Response;
+    try {
+      response = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        signal: AbortSignal.timeout(10000),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: env.GOOGLE_EDITOR_CLIENT_ID,
+          client_secret: env.GOOGLE_EDITOR_CLIENT_SECRET,
+          grant_type: "authorization_code",
+          code: input.code,
+          code_verifier: input.codeVerifier,
+          redirect_uri: input.redirectUri,
+        }),
+      });
+    } catch {
+      throw new AuthError("provider_unavailable", 503);
+    }
+    if (!response.ok)
+      throw new AuthError(
+        response.status >= 500 || response.status === 429
+          ? "provider_unavailable"
+          : "invalid_provider_proof",
+        response.status >= 500 || response.status === 429 ? 503 : 401,
+      );
+    let result: { id_token?: string };
+    try {
+      result = await response.json();
+    } catch {
+      throw new AuthError("provider_unavailable", 503);
+    }
+    if (!result.id_token) throw new AuthError("invalid_provider_proof", 401);
+    input = { ...input, idToken: result.id_token };
+    exchangedGoogleCode = true;
+  }
   if (provider === "discord") {
     if (
       !env.DISCORD_GAME_CLIENT_ID ||
@@ -127,6 +186,7 @@ export async function providerProof(
     if (
       !issuers.includes(payload.iss) ||
       !audiences.includes(payload.aud) ||
+      (exchangedGoogleCode && payload.aud !== env.GOOGLE_EDITOR_CLIENT_ID) ||
       typeof payload.sub !== "string" ||
       !payload.sub ||
       typeof payload.exp !== "number" ||

@@ -830,17 +830,47 @@ function wireProviders(app: Hono<AppEnv>) {
     let redirect: string | null = null,
       challenge: string | null = null,
       authorizeUrl: string | undefined;
-    if (provider === "discord") {
+    if (
+      provider === "discord" ||
+      (provider === "google" && b.redirectUri != null)
+    ) {
+      const google = provider === "google";
+      if (
+        google &&
+        (!c.env.GOOGLE_EDITOR_CLIENT_ID ||
+          !c.env.GOOGLE_EDITOR_CLIENT_SECRET ||
+          !c.env.GOOGLE_CLIENT_IDS?.split(",")
+            .map((s) => s.trim())
+            .includes(c.env.GOOGLE_EDITOR_CLIENT_ID))
+      )
+        throw new AuthError("provider_not_configured", 503);
       redirect = text(b, "redirectUri", 512);
       challenge = text(b, "codeChallenge", 64);
       if (
         !/^[A-Za-z0-9_-]{43}$/.test(challenge) ||
-        !c.env.DISCORD_GAME_REDIRECT_URIS?.split(",")
+        !(
+          google
+            ? c.env.GOOGLE_EDITOR_REDIRECT_URIS
+            : c.env.DISCORD_GAME_REDIRECT_URIS
+        )
+          ?.split(",")
           .map((s) => s.trim())
           .includes(redirect)
       )
         throw new AuthError("invalid_redirect_or_pkce");
-      authorizeUrl = `https://discord.com/oauth2/authorize?${new URLSearchParams({ client_id: c.env.DISCORD_GAME_CLIENT_ID!, response_type: "code", scope: "identify", redirect_uri: redirect, state: id, code_challenge: challenge, code_challenge_method: "S256" })}`;
+      if (google) {
+        const callback = new URL(redirect);
+        if (
+          callback.protocol !== "http:" ||
+          !["localhost", "127.0.0.1"].includes(callback.hostname) ||
+          callback.username ||
+          callback.password ||
+          callback.search ||
+          callback.hash
+        )
+          throw new AuthError("invalid_redirect_or_pkce");
+      }
+      authorizeUrl = `${google ? "https://accounts.google.com/o/oauth2/v2/auth" : "https://discord.com/oauth2/authorize"}?${new URLSearchParams({ client_id: google ? c.env.GOOGLE_EDITOR_CLIENT_ID! : c.env.DISCORD_GAME_CLIENT_ID!, response_type: "code", scope: google ? "openid email" : "identify", redirect_uri: redirect, state: id, code_challenge: challenge, code_challenge_method: "S256", ...(google ? { nonce, prompt: "select_account" } : {}) })}`;
     }
     await stmt(
       c.env,
@@ -892,13 +922,19 @@ function wireProviders(app: Hono<AppEnv>) {
     if (intent === "link" && owner?.player_id !== challenge.player_id)
       throw new AuthError("challenge_owner_mismatch", 403);
     if (
-      provider === "discord" &&
+      (provider === "discord" || challenge.redirect_uri !== null) &&
       (b.state !== challengeId ||
         b.redirectUri !== challenge.redirect_uri ||
         typeof b.codeVerifier !== "string" ||
         (await hash(b.codeVerifier)) !== challenge.code_challenge)
     )
       throw new AuthError("invalid_state_or_pkce", 401);
+    if (
+      provider === "google" &&
+      challenge.redirect_uri !== null &&
+      (typeof b.code !== "string" || !b.code || b.idToken != null)
+    )
+      throw new AuthError("invalid_provider_proof", 401);
     const requestHash = await mac(
       c.env.PLAYER_TOKEN_SECRET,
       canonical({
