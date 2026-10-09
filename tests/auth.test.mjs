@@ -76,7 +76,7 @@ before(async () => {
           "http://127.0.0.1:18081/oauth/google/callback",
         DISCORD_GAME_CLIENT_ID: "fixture-client",
         DISCORD_GAME_CLIENT_SECRET: "synthetic-discord-secret",
-        DISCORD_GAME_REDIRECT_URIS: "ec1fixture://discord",
+        DISCORD_GAME_REDIRECT_URIS: "ec1fixture://discord,https://test.local/api/auth/discord/callback",
       },
       outboundService: async (request) => {
         requests.push(request.url);
@@ -962,6 +962,41 @@ test("Discord state and PKCE proof create independent EC1 account without fallba
     "invalid_or_used_challenge",
   );
   assert.ok(requests.every((url) => !url.toLowerCase().includes("playfab")));
+});
+test("Discord browser bridge validates pending state and returns only to the EC1 game", async () => {
+  const redirectUri = "https://test.local/api/auth/discord/callback";
+  const pending = await request("/api/auth/provider/discord/challenge", {
+    intent: "signin", redirectUri, codeChallenge: "A".repeat(43),
+  });
+  assert.equal(pending.status, 200);
+  const outbound = requests.length;
+  const callback = async (query, origin = "https://test.local") => mf.dispatchFetch(
+    `${origin}/api/auth/discord/callback?${query}`, { redirect: "manual" },
+  );
+  const success = await callback(new URLSearchParams({ state: pending.state, code: "synthetic+code" }));
+  assert.equal(success.status, 302);
+  const target = new URL(success.headers.get("Location"));
+  assert.equal(target.protocol, "gacogames-ec1-bridge:");
+  assert.equal(target.hostname, "oauth");
+  assert.equal(target.pathname, "/discord");
+  assert.equal(target.searchParams.get("code"), "synthetic+code");
+  assert.equal(target.searchParams.get("state"), pending.state);
+  assert.equal(success.headers.get("Cache-Control"), "no-store");
+  assert.equal(success.headers.get("Referrer-Policy"), "no-referrer");
+  assert.equal((await callback(`state=${pending.state}&error=access_denied`)).status, 302);
+  for (const query of ["code=x", `state=${pending.state}&code=x&code=y`,
+    `state=${pending.state}&code=x&error=access_denied`, `state=${pending.state}&error=`,
+    `state=${pending.state}&code=%0A`, `state=${pending.state}&code=${"x".repeat(2049)}`]) {
+    assert.equal((await callback(query)).status, 400);
+  }
+  assert.equal((await callback(`state=${"X".repeat(43)}&code=x`)).status, 401);
+  assert.equal((await callback(`state=${pending.state}&code=x`, "https://evil.invalid")).status, 400);
+  await db.prepare("UPDATE auth_challenge SET expires_at=0 WHERE id=?").bind(pending.state).run();
+  assert.equal((await callback(`state=${pending.state}&code=x`)).status, 401);
+  await db.prepare("UPDATE auth_challenge SET expires_at=?,used_at=1 WHERE id=?")
+    .bind(Math.floor(Date.now()/1000)+300, pending.state).run();
+  assert.equal((await callback(`state=${pending.state}&code=x`)).status, 401);
+  assert.equal(requests.length, outbound);
 });
 test("provider outages stay typed retryable errors and cannot create profiles", async () => {
   const pending = await request("/api/auth/provider/google/challenge", {

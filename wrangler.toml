@@ -30,6 +30,8 @@ IAP_APPLE_VERIFICATION_MODE = "receipt"
 MAIL_FROM = "noreply@gacogames.com"
 PASSWORD_RESET_ORIGIN = "https://ec1.gacogames.com"
 DISCORD_ADMIN_REDIRECT_URI = "https://ec1mod.codezrv.com/auth/discord/callback"
+DISCORD_GAME_CLIENT_ID = "1557970385440481310"
+DISCORD_GAME_REDIRECT_URIS = "https://ec1mod.codezrv.com/api/auth/discord/callback,discord-1557970385440481310:/authorize/callback"
 
 [[services]]
 binding = "ADMIN_AUTHORITY"
@@ -83,6 +85,8 @@ IAP_APPLE_VERIFICATION_MODE = "receipt"
 PLAYFAB_TITLE_ID = "3BFE7"
 MAIL_FROM = "noreply@gacogames.com"
 PASSWORD_RESET_ORIGIN = "https://epicon1-backend-staging.johanesnindyo.workers.dev"
+DISCORD_GAME_CLIENT_ID = "1557970385440481310"
+DISCORD_GAME_REDIRECT_URIS = "https://epicon1-backend-staging.johanesnindyo.workers.dev/api/auth/discord/callback,http://127.0.0.1:18082/oauth/discord/callback,discord-1557970385440481310:/authorize/callback"
 [env.staging.triggers]
 crons = ["0 * * * *"]
 [[env.staging.d1_databases]]

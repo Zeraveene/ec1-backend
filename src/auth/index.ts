@@ -13,6 +13,7 @@ import {
 } from "./crypto";
 import { AuthError, providerProof } from "./providers";
 import { bootstrapAcknowledgementWindow, rateLimit } from "./maintenance";
+import { createDiscordBridge } from "./discord-bridge";
 import {
   activeDeviceSession,
   credentialOwner,
@@ -428,6 +429,7 @@ async function create(
 }
 export function createAuthApp() {
   const app = new Hono<AppEnv>();
+  app.route("/", createDiscordBridge());
   app.onError((error, c) =>
     error instanceof AuthError
       ? c.json(
