@@ -7,6 +7,7 @@ import { createGameApp } from "./game";
 import { createAdminApp, createAdminAuthApp, cleanupAdminState } from "./admin";
 import { createRecoveryApp } from "./recovery";
 import { createPurchasesApp } from "./purchases";
+import { createClassicAdminControl } from "./admin/control";
 
 const app = new Hono<AppEnv>();
 app.use("*", secureHeaders());
@@ -34,6 +35,7 @@ app.route("/api/purchases", createPurchasesApp());
 app.route("/api/game", createGameApp());
 app.route("/auth", createAdminAuthApp());
 app.route("/api/admin", createAdminApp());
+app.route("/api/classic-admin", createClassicAdminControl());
 app.notFound(async (c) => {
   if (c.req.path.startsWith("/api/") || c.req.path.startsWith("/auth/"))
     return c.json({ error: "not_found" }, 404);
@@ -76,3 +78,5 @@ export default {
     ]);
   },
 };
+
+export { AdminWorkspace } from "./admin/workspace";

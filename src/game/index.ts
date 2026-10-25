@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { createBackupsApp } from "./backups";
+import { createClassicMigrationApp } from "../migration/classic";
 import { bodyLimit } from "hono/body-limit";
 import type { AppEnv, Env } from "../env";
 import { mintMigrationSession, requirePlayer } from "../auth";
@@ -215,6 +217,15 @@ export function createGameApp(): Hono<AppEnv> {
       return c.json({ error: "migration_scope_restricted" }, 403);
     await next();
   });
+  app.route("/migration/classic", createClassicMigrationApp());
+  // Historical grant/save writers mutate preference dictionaries and cannot publish canonical manual backups.
+  app.use("*", async (c, next) => {
+    if (c.env.EC1_MANUAL_BACKUPS_ENABLED === "true" && c.req.method !== "GET" &&
+        (c.req.path.endsWith("/save") || /\/(?:claim|daily|coupon|migration)(?:\/|$)/.test(c.req.path)))
+      throw new GameError("legacy_gameplay_writer_disabled", 503);
+    await next();
+  });
+  app.route("/backups", createBackupsApp());
   app.get("/readiness", async (c) => {
     const p = c.get("player"),
       row = await c.env.DB.prepare(

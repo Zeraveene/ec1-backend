@@ -17,7 +17,7 @@ The shared moderation application `1499961450536636617` already includes `https:
 
 Bridge deployed to staging (`90ca9656-19cb-4241-bd48-cbd841aec951`) and production (`a3bb681a-b848-4692-adb5-69c238a0bbae`) on 2026-10-09. TypeScript, all 57 synthetic integration tests and dashboard build passed. Unity recompiled without errors and the synthetic harness passed 152 assertions plus its separate purchase checks. Both live bridge endpoints reject unknown state with 401 and no-store. Production creation and migration remain disabled.
 
-The user provisioned the production client secret on 2026-10-09. Live production challenge issuance now returns 200 with the EC1 app ID, exact production callback, identify scope, S256 PKCE and bound state. A cancellation callback returns 302 to the fixed EC1 deep link. These checks do not validate the secret through Discord token exchange. Staging still returns 503 provider_not_configured; provision the same EC1 app secret there with `npx wrangler secret put DISCORD_GAME_CLIENT_SECRET --env staging`.
+The user provisioned the production client secret on 2026-10-09. Live production challenge issuance now returns 200 with the EC1 app ID, exact production callback, identify scope, S256 PKCE and bound state. A cancellation callback returns 302 to the fixed EC1 deep link. These checks do not validate the secret through Discord token exchange. At that historical check staging returned 503 provider_not_configured. The later staging deletion below supersedes provisioning instructions; do not recreate or provision it.
 
 The user subsequently requested removal of the staging Worker. `epicon1-backend-staging` was deleted on 2026-10-09; do not provision its secret or redeploy it. Historical staging references above describe the earlier setup. Use production for further Discord configuration. Staging storage resources were not part of the Worker deletion request.
 
@@ -26,3 +26,9 @@ Pending: real login and signed builds. Unity Social SDK 1.10.19337 is installed 
 Social SDK access: EC1 belongs to the Gaco Games developer team. Enrollment was completed by the user; the Downloads page was verified on 2026-10-09 and the downloaded UnityPlugin 1.10.19337 archive was installed. Keep client secrets on the backend even when using the SDK.
 
 Official callback format: https://docs.discord.com/developers/discord-social-sdk/development-guides/account-linking-on-mobile
+
+## Production broker update — 2026-10-23
+
+EC1 Worker `990a5532-047e-478d-aaa4-f78c82cef9e7` is deployed with browser-ticket support; the existing production Discord secret was retained. For `transport:'browser'` challenges, `src/auth/browser.ts` handles the existing HTTPS callback, exchanges the provider code using separate server PKCE, and returns a verifier-bound ticket through the fixed EC1 deep link or polling endpoint. Legacy non-browser challenges retain the earlier code bridge described above. Desktop/Editor browser fallback can poll and requires no loopback listener. See [auth protocol](auth.md).
+
+Live synthetic challenge, verifier-bound polling and cancellation checks passed for Discord, Google and Apple. They did not perform an actual provider code/token exchange or signed-device login. Production creation, migration, recovery and purchases remain paused; manual backups are disabled. The deleted staging Worker was not recreated. Real login, packaged callback/account-switch behavior and signed builds remain release gates.

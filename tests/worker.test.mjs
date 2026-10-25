@@ -12,6 +12,7 @@ before(async () => {
     bundle: true,
     format: "esm",
     platform: "browser",
+    external: ["cloudflare:workers"],
     write: false,
   });
   mf = new Miniflare(

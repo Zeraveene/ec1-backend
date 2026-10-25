@@ -21,7 +21,7 @@ Run `npx wrangler d1 migrations apply epicon1-player-data-staging --env staging 
 
 All resources belong to the existing Cloudflare account. Signing secrets differ by environment and purpose. `secrets/` and `.dev.vars*` are ignored; they must never enter Git, dashboard assets or Unity player builds.
 
-`wrangler.toml` contains explicit resource IDs. Apply migrations to the matching database before deployment. `npm run deploy:staging` runs checks and deploys staging. `npm run deploy` checks and deploys production preparation, where new accounts and migration are disabled by default. Staging allows synthetic new accounts. Neither deployment enables PlayFab migration, purchases or recovery email by itself.
+`wrangler.toml` contains explicit resource IDs. Apply migrations to the matching database before deployment. The staging Worker was deleted at the user’s request; do not run `npm run deploy:staging`, recreate it or provision its secrets. Its checked-in environment remains usable for local synthetic development only. `npm run deploy` checks and deploys production preparation, where new accounts and migration remain disabled. Deployment requires user authorization and does not itself enable migration, purchases or recovery.
 
 ## Account and save guarantees
 
@@ -42,7 +42,7 @@ Player search/detail, save revisions/restore, in-game mail, restrictions, daily 
 
 ## Remaining release gates
 
-The implementation and synthetic tests do not establish signed-device or store readiness. The EC1 PlayFab server secret is provisioned only in production; migration stays paused. Complete the provider registrations/redirects, store verification credentials and signed Android/iOS tests before enabling those features. Verify transactional email delivery before `RECOVERY_ENABLED=true`; tests never send real emails. Prove native creation → first save → app restart → same-profile sign-in on devices before enabling migration for returning players.
+The implementation and synthetic tests do not establish signed-device or store readiness. The EC1 PlayFab server secret is provisioned only in production; migration stays paused. Production Google/Apple browser registrations, secret installation and EC1 deployment completed on 2026-10-23; synthetic challenge/poll/cancellation checks passed for Google, Apple and Discord. Actual provider token exchange, signed Android/iOS authentication, Apple lifecycle handling and store verification remain release gates. See the [deployment record](docs/auth.md#deployed-production-browser-configuration--2026-10-23). Manual backups remain disabled because their flag is absent. Verify transactional email delivery before `RECOVERY_ENABLED=true`; tests never send real emails. Prove native creation → first save → app restart → same-profile sign-in on devices before enabling migration for returning players.
 
 See the [implementation results and remaining gates](docs/overnight-results-2026-10-09.md), [auth protocol](docs/auth.md), [save and migration contract](docs/save-contract.md), and the Unity project's `docs/ec1-backend-migration-plan.md` and client handoff for detailed decisions and outstanding work.
 

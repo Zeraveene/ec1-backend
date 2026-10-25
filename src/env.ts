@@ -1,4 +1,5 @@
 export interface Env {
+  EC1_MANUAL_BACKUPS_ENABLED?: string;
   DB: D1Database;
   PLAYER_SAVES: R2Bucket;
   AUDIT_BLOBS: R2Bucket;
@@ -17,7 +18,11 @@ export interface Env {
   IAP_ALLOW_TEST_PURCHASES?: string;
   PLAYER_TOKEN_SECRET: string;
   ADMIN_SESSION_SECRET?: string;
+  // Default entrypoint; introspects the existing central admin session only.
+  EC2_ADMIN_SESSION?: Fetcher;
+  CLASSIC_ADMIN_ORIGIN?: string;
   ADMIN_AUTHORITY?: {
+    getRole?(discordId: string): Promise<"internal" | "manager" | "guest" | null>;
     isAllowed(discordId: string): Promise<boolean>;
     getConfiguration(): Promise<{ configured: boolean; clientId?: string }>;
     exchangeIdentity(
@@ -39,6 +44,14 @@ export interface Env {
   GOOGLE_EDITOR_CLIENT_SECRET?: string;
   GOOGLE_EDITOR_REDIRECT_URIS?: string;
   APPLE_CLIENT_IDS?: string;
+  GOOGLE_BROWSER_CLIENT_ID?: string;
+  GOOGLE_BROWSER_CLIENT_SECRET?: string;
+  GOOGLE_BROWSER_REDIRECT_URI?: string;
+  APPLE_BROWSER_CLIENT_ID?: string;
+  APPLE_BROWSER_TEAM_ID?: string;
+  APPLE_BROWSER_KEY_ID?: string;
+  APPLE_BROWSER_PRIVATE_KEY?: string;
+  APPLE_BROWSER_REDIRECT_URI?: string;
   DISCORD_GAME_CLIENT_ID?: string;
   DISCORD_GAME_CLIENT_SECRET?: string;
   DISCORD_GAME_REDIRECT_URIS?: string;

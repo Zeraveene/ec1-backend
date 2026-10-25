@@ -13,7 +13,9 @@ import {
 } from "./crypto";
 import { AuthError, providerProof } from "./providers";
 import { bootstrapAcknowledgementWindow, rateLimit } from "./maintenance";
+import { browserAuthorize, browserConfig, createBrowserAuth } from "./browser";
 import { createDiscordBridge } from "./discord-bridge";
+import { beginEmailClassic, beginClassicProof, finalizeClassic } from "./legacy-cutover";
 import {
   activeDeviceSession,
   credentialOwner,
@@ -82,6 +84,7 @@ export const requirePlayer = createMiddleware<AppEnv>(async (c, next) => {
       c.req.path === "/api/game/readiness" ||
       c.req.path === "/api/auth/readiness" ||
       c.req.path === "/api/auth/logout" ||
+      c.req.path === "/api/auth/migration/classic/finalize" ||
       c.req.path === "/api/auth/link/email" ||
       c.req.path === "/api/auth/link/device" ||
       (c.req.path === "/api/auth/identities" && c.req.method === "GET")
@@ -122,6 +125,29 @@ async function result(env: Env, session: Session, refreshToken: string) {
     saveVersion: player.save_version,
   };
 }
+interface IdentitySessionProof {
+  subject: string;
+  passwordHash: string | null;
+  salt: string | null;
+  createdAt: number;
+  ownerSessionId?: string;
+  challenge?: { id: string; requestHash: string; intent: string };
+}
+// Re-evaluate the credential and its authorization at the D1 publication boundary.
+// Admin identity actions can revoke a proof while PBKDF2/provider verification awaits.
+function identitySessionGuard(playerId: string, provider: string, proof: IdentitySessionProof) {
+  let sql = "EXISTS(SELECT 1 FROM auth_identity WHERE provider=? AND subject=? AND player_id=? AND password_hash IS ? AND salt IS ? AND created_at=?)";
+  const values: unknown[] = [provider, proof.subject, playerId, proof.passwordHash, proof.salt, proof.createdAt];
+  if (proof.ownerSessionId) {
+    sql += " AND EXISTS(SELECT 1 FROM auth_session WHERE id=? AND player_id=? AND revoked_at IS NULL AND expires_at>?)";
+    values.push(proof.ownerSessionId, playerId, now());
+  }
+  if (proof.challenge) {
+    sql += " AND EXISTS(SELECT 1 FROM auth_challenge WHERE id=? AND provider=? AND intent=? AND player_id IS ? AND proof_hash=? AND verified_subject=? AND used_at IS NOT NULL AND expires_at>?)";
+    values.push(proof.challenge.id, provider, proof.challenge.intent, proof.ownerSessionId ? playerId : null, proof.challenge.requestHash, proof.subject, now());
+  }
+  return { sql, values };
+}
 async function openSession(
   env: Env,
   playerId: string,
@@ -130,7 +156,10 @@ async function openSession(
   seed?: string,
   device?: DeviceCredential,
   bootstrap?: BootstrapProof,
+  identityProof?: IdentitySessionProof,
 ) {
+  if (!device && !bootstrap && !identityProof) throw new AuthError("invalid_credentials", 401);
+  const guard = identityProof ? identitySessionGuard(playerId, provider, identityProof) : null;
   await active(env, playerId);
   const id = seed
     ? await mac(env.PLAYER_TOKEN_SECRET, `ec1/session/${seed}`)
@@ -173,13 +202,14 @@ async function openSession(
           )
         : stmt(
             env,
-            "INSERT OR IGNORE INTO auth_session(id,player_id,provider,device_id,created_at,expires_at) VALUES(?,?,?,?,?,?)",
+            `INSERT OR IGNORE INTO auth_session(id,player_id,provider,device_id,created_at,expires_at) SELECT ?,?,?,?,?,? WHERE ${guard!.sql}`,
             id,
             playerId,
             provider,
             deviceId,
             now(),
             now() + lifetime,
+            ...guard!.values,
           ),
     bootstrap
       ? stmt(
@@ -196,16 +226,19 @@ async function openSession(
         )
       : stmt(
           env,
-          "INSERT OR IGNORE INTO auth_refresh(hash,session_id,expires_at) SELECT ?,id,? FROM auth_session WHERE id=?",
+          `INSERT OR IGNORE INTO auth_refresh(hash,session_id,expires_at) SELECT ?,id,? FROM auth_session WHERE id=? AND revoked_at IS NULL AND expires_at>?${guard ? ` AND ${guard.sql}` : ""}`,
           await hash(refresh),
           now() + lifetime,
           id,
+          now(),
+          ...(guard?.values ?? []),
         ),
   ]);
   const session = await stmt(
     env,
-    "SELECT * FROM auth_session WHERE id=?",
+    `SELECT * FROM auth_session WHERE id=?${guard ? ` AND ${guard.sql}` : ""}`,
     id,
+    ...(guard?.values ?? []),
   ).first<Session>();
   const initial = await stmt(
     env,
@@ -231,6 +264,8 @@ async function openSession(
     throw new AuthError("bootstrap_retry_expired", 409);
   if (!session && device)
     throw new AuthError("invalid_device_credentials", 401);
+  if (!session && identityProof)
+    throw new AuthError("invalid_credentials", 401);
   if (
     !session ||
     session.revoked_at ||
@@ -429,6 +464,7 @@ async function create(
 }
 export function createAuthApp() {
   const app = new Hono<AppEnv>();
+  app.route("/", createBrowserAuth());
   app.route("/", createDiscordBridge());
   app.onError((error, c) =>
     error instanceof AuthError
@@ -472,6 +508,11 @@ export function createAuthApp() {
       );
     }
     await next();
+  });
+  app.post("/migration/classic/finalize", requirePlayer, async c => {
+    const p = c.get("player");
+    if(p.scope!=="migration" || p.provider!=="legacy") throw new AuthError("insufficient_scope",403);
+    return c.json(await finalizeClassic(c.env,p.playerId,p.sessionId));
   });
   app.post("/guest", async (c) => {
     const b = await body(c);
@@ -615,13 +656,15 @@ export function createAuthApp() {
     if ((rate?.count || 0) > 15) throw new AuthError("rate_limited", 429);
     const identity = await stmt(
       c.env,
-      "SELECT player_id,password_hash,salt FROM auth_identity WHERE provider='email' AND subject=?",
+      "SELECT player_id,password_hash,salt,created_at FROM auth_identity WHERE provider='email' AND subject=?",
       subject,
-    ).first<{ player_id: string; password_hash: string; salt: string }>();
+    ).first<{ player_id: string; password_hash: string; salt: string; created_at: number }>();
     const digest = await passwordHash(
       pass,
       identity?.salt || "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     );
+    if (!identity && c.env.LEGACY_MIGRATION_ENABLED === "true")
+      return c.json(await beginEmailClassic(c.env, subject, pass, typeof b.deviceId === "string" ? b.deviceId : null));
     if (!identity || digest !== identity.password_hash)
       throw new AuthError("invalid_credentials", 401);
     return c.json(
@@ -630,6 +673,10 @@ export function createAuthApp() {
         identity.player_id,
         "email",
         typeof b.deviceId === "string" ? b.deviceId : null,
+        undefined,
+        undefined,
+        undefined,
+        { subject, passwordHash: identity.password_hash, salt: identity.salt, createdAt: identity.created_at },
       ),
     );
   });
@@ -818,9 +865,9 @@ function configured(env: Env, provider: string) {
 function wireProviders(app: Hono<AppEnv>) {
   app.post("/provider/:provider/challenge", async (c) => {
     const provider = c.req.param("provider");
-    configured(c.env, provider);
     const b = await body(c),
       intent = text(b, "intent");
+    if (b.transport === "browser") browserConfig(c.env, provider); else configured(c.env, provider);
     if (!["signin", "create", "link"].includes(intent))
       throw new AuthError("invalid_intent");
     const owner =
@@ -832,7 +879,12 @@ function wireProviders(app: Hono<AppEnv>) {
     let redirect: string | null = null,
       challenge: string | null = null,
       authorizeUrl: string | undefined;
-    if (
+    const browser = b.transport === "browser";
+    if (browser) {
+      challenge = text(b, "codeChallenge", 64);
+      if (!/^[A-Za-z0-9_-]{43}$/.test(challenge)) throw new AuthError("invalid_state_or_pkce", 401);
+      authorizeUrl = await browserAuthorize(c.env, provider, id, nonce);
+    } else if (
       provider === "discord" ||
       (provider === "google" && b.redirectUri != null)
     ) {
@@ -886,11 +938,11 @@ function wireProviders(app: Hono<AppEnv>) {
       challenge,
       now() + 300,
     ).run();
-    return c.json({ challengeId: id, nonce, state: id, authorizeUrl });
+    if (browser) await stmt(c.env, "UPDATE auth_challenge SET browser_transport=1 WHERE id=?", id).run();
+    return c.json({ challengeId: id, nonce, state: id, authorizeUrl, ...(browser ? { transport: "browser" } : {}) });
   });
   app.post("/provider/:provider", async (c) => {
     const provider = c.req.param("provider");
-    configured(c.env, provider);
     const b = await body(c),
       challengeId = text(b, "challengeId", 128),
       intent = text(b, "intent");
@@ -909,6 +961,9 @@ function wireProviders(app: Hono<AppEnv>) {
       used_at: number | null;
       proof_hash: string | null;
       verified_subject: string | null;
+      browser_transport: number;
+      browser_subject: string | null;
+      browser_ticket_hash: string | null;
     }>();
     if (
       !challenge ||
@@ -917,14 +972,16 @@ function wireProviders(app: Hono<AppEnv>) {
       challenge.expires_at <= now()
     )
       throw new AuthError("invalid_or_used_challenge", 401);
+    if (challenge.browser_transport) browserConfig(c.env, provider); else configured(c.env, provider);
     const owner =
       intent === "link"
         ? await authenticated(c.env, c.req.header("Authorization"))
         : null;
     if (intent === "link" && owner?.player_id !== challenge.player_id)
       throw new AuthError("challenge_owner_mismatch", 403);
+    if (challenge.browser_transport && (b.state !== challengeId || typeof b.codeVerifier !== "string" || !/^[A-Za-z0-9._~-]{43,128}$/.test(b.codeVerifier) || await hash(b.codeVerifier) !== challenge.code_challenge || typeof b.ticket !== "string" || await hash(b.ticket) !== challenge.browser_ticket_hash || !challenge.browser_subject || b.idToken != null || b.code != null)) throw new AuthError("invalid_state_or_pkce",401);
     if (
-      (provider === "discord" || challenge.redirect_uri !== null) &&
+      !challenge.browser_transport && (provider === "discord" || challenge.redirect_uri !== null) &&
       (b.state !== challengeId ||
         b.redirectUri !== challenge.redirect_uri ||
         typeof b.codeVerifier !== "string" ||
@@ -956,7 +1013,7 @@ function wireProviders(app: Hono<AppEnv>) {
       subject = challenge.verified_subject;
     } else {
       try {
-        subject = await providerProof(c.env, provider, b, challenge.nonce);
+        subject = challenge.browser_transport ? challenge.browser_subject! : await providerProof(c.env, provider, b, challenge.nonce);
       } catch (error) {
         if (error instanceof TypeError || error instanceof DOMException)
           throw new AuthError("provider_unavailable", 503);
@@ -985,14 +1042,20 @@ function wireProviders(app: Hono<AppEnv>) {
     }
     const identity = await stmt(
       c.env,
-      "SELECT player_id FROM auth_identity WHERE provider=? AND subject=?",
+      "SELECT player_id,password_hash,salt,created_at FROM auth_identity WHERE provider=? AND subject=?",
       provider,
       subject,
-    ).first<{ player_id: string }>();
+    ).first<{ player_id: string; password_hash: string | null; salt: string | null; created_at: number }>();
     if (intent === "create")
       return c.json(await create(c.env, b, provider, subject));
     if (intent === "signin") {
-      if (!identity) throw new AuthError("identity_not_registered", 404);
+      if (!identity) {
+        if (provider === "google" && c.env.LEGACY_MIGRATION_ENABLED === "true") {
+          if (!challenge.browser_transport) throw new AuthError("legacy_google_browser_required",409);
+          return c.json(await beginClassicProof(c.env, challengeId, subject, typeof b.deviceId === "string" ? b.deviceId : null));
+        }
+        throw new AuthError("identity_not_registered", 404);
+      }
       return c.json(
         await openSession(
           c.env,
@@ -1000,6 +1063,10 @@ function wireProviders(app: Hono<AppEnv>) {
           provider,
           typeof b.deviceId === "string" ? b.deviceId : null,
           `provider/${challengeId}/${requestHash}`,
+          undefined,
+          undefined,
+          { subject, passwordHash: identity.password_hash, salt: identity.salt, createdAt: identity.created_at,
+            challenge: { id: challengeId, requestHash, intent } },
         ),
       );
     }
@@ -1021,18 +1088,27 @@ function wireProviders(app: Hono<AppEnv>) {
       throw new AuthError("identity_already_claimed", 409);
     await stmt(
       c.env,
-      "INSERT OR IGNORE INTO auth_identity(provider,subject,player_id,created_at) VALUES(?,?,?,?)",
+      "INSERT OR IGNORE INTO auth_identity(provider,subject,player_id,created_at) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM auth_session WHERE id=? AND player_id=? AND revoked_at IS NULL AND expires_at>?) AND EXISTS(SELECT 1 FROM auth_challenge WHERE id=? AND provider=? AND intent='link' AND player_id=? AND proof_hash=? AND verified_subject=? AND used_at IS NOT NULL AND expires_at>?)",
       provider,
       subject,
       owner.player_id,
       now(),
+      owner.id,
+      owner.player_id,
+      now(),
+      challengeId,
+      provider,
+      owner.player_id,
+      requestHash,
+      subject,
+      now(),
     ).run();
     const linked = await stmt(
       c.env,
-      "SELECT player_id FROM auth_identity WHERE provider=? AND subject=?",
+      "SELECT player_id,password_hash,salt,created_at FROM auth_identity WHERE provider=? AND subject=?",
       provider,
       subject,
-    ).first<{ player_id: string }>();
+    ).first<{ player_id: string; password_hash: string | null; salt: string | null; created_at: number }>();
     if (linked?.player_id !== owner.player_id)
       throw new AuthError("identity_link_conflict", 409);
     return c.json(
@@ -1042,6 +1118,10 @@ function wireProviders(app: Hono<AppEnv>) {
         provider,
         owner.device_id,
         `provider/${challengeId}/${requestHash}`,
+        undefined,
+        undefined,
+        { subject, passwordHash: linked.password_hash, salt: linked.salt, createdAt: linked.created_at,
+          ownerSessionId: owner.id, challenge: { id: challengeId, requestHash, intent } },
       ),
     );
   });
@@ -1063,34 +1143,42 @@ function wireProviders(app: Hono<AppEnv>) {
     const resume = async () => {
       const existing = await stmt(
         c.env,
-        "SELECT player_id,password_hash,salt FROM auth_identity WHERE provider='email' AND subject=?",
+        "SELECT player_id,password_hash,salt,created_at FROM auth_identity WHERE provider='email' AND subject=?",
         subject,
-      ).first<{ player_id: string; password_hash: string; salt: string }>();
-      if (!existing) return false;
+      ).first<{ player_id: string; password_hash: string; salt: string; created_at: number }>();
+      if (!existing) return null;
       if (
         existing.player_id !== player.playerId ||
         existing.password_hash !== (await passwordHash(pass, existing.salt))
       )
         throw new AuthError("identity_link_conflict", 409);
-      return true;
+      return { subject, passwordHash: existing.password_hash, salt: existing.salt, createdAt: existing.created_at };
     };
-    if (!(await resume())) {
+    let identityProof = await resume();
+    if (!identityProof) {
       if (player.scope !== "migration") password(b);
       if (player.scope === "migration")
         await verifyLegacyEmail(c.env, player.playerId, subject, pass);
       try {
-        await stmt(
+        const digest = await passwordHash(pass, salt), createdAt = now();
+        const inserted = await stmt(
           c.env,
-          "INSERT INTO auth_identity(provider,subject,player_id,password_hash,salt,created_at) VALUES(?,?,?,?,?,?)",
+          "INSERT INTO auth_identity(provider,subject,player_id,password_hash,salt,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM auth_session WHERE id=? AND player_id=? AND revoked_at IS NULL AND expires_at>?)",
           "email",
           subject,
           player.playerId,
-          await passwordHash(pass, salt),
+          digest,
           salt,
+          createdAt,
+          player.sessionId,
+          player.playerId,
           now(),
         ).run();
+        if (!inserted.meta.changes) throw new AuthError("unauthorized", 401);
+        identityProof = { subject, passwordHash: digest, salt, createdAt };
       } catch (error) {
-        if (!(await resume())) {
+        identityProof = await resume();
+        if (!identityProof) {
           if (
             await stmt(
               c.env,
@@ -1110,6 +1198,9 @@ function wireProviders(app: Hono<AppEnv>) {
         "email",
         player.deviceId,
         `link-email/${seed}`,
+        undefined,
+        undefined,
+        { ...identityProof!, ownerSessionId: player.sessionId },
       ),
     );
   });

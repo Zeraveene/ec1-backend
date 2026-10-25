@@ -25,6 +25,8 @@ interface Revision {
   payload_hash: string;
 }
 export interface PublicationOptions {
+  // Exact forensic restore only; never available to client save/grant callers.
+  preserveSourceData?: boolean;
   allowPlaytimeDecrease?: boolean;
   legacy?: boolean;
   saveState?: string;
@@ -129,6 +131,9 @@ export async function publishSnapshot(
   input: unknown,
   options: PublicationOptions = {},
 ): Promise<SaveResult> {
+  if (options.preserveSourceData && (!options.adminAudit || !options.allowPlaytimeDecrease ||
+      options.purchase || options.grant || options.migration))
+    throw new GameError("invalid_exact_restore", 400);
   const original = validateSnapshot(input, options.legacy);
   let snapshot = original.snapshot;
   const payloadHash = await sha256(stableJson({ snapshot, options }));
@@ -140,7 +145,7 @@ export async function publishSnapshot(
   );
   if (replay) return replay;
   // The original request hash is stable across paid-flag enforcement and response-loss retries.
-  if (
+  if (!options.preserveSourceData &&
     await env.DB.prepare(
       "SELECT 1 FROM sqlite_master WHERE type='table' AND name='purchase_entitlement'",
     ).first()

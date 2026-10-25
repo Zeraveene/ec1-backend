@@ -14,7 +14,8 @@ let mf,
   requests = [],
   providerUnavailable = false,
   editorIdToken = "",
-  legacyMismatch = false;
+  legacyMismatch = false,
+  browserDiscord = false;
 const secret = "local-synthetic-player-secret-at-least-32-characters";
 const b64 = (v) =>
   Buffer.from(
@@ -70,6 +71,14 @@ before(async () => {
         LEGACY_MIGRATION_ENABLED: "true",
         PLAYFAB_TITLE_ID: "SYNTHETIC",
         GOOGLE_CLIENT_IDS: "ec1-google-fixture,ec1-editor-fixture",
+        APPLE_BROWSER_CLIENT_ID: "browser-apple",
+        APPLE_BROWSER_TEAM_ID: "synthetic-team",
+        APPLE_BROWSER_KEY_ID: "synthetic-key",
+        APPLE_BROWSER_PRIVATE_KEY: await (async()=>{const pair=await webcrypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);return `-----BEGIN PRIVATE KEY-----\n${Buffer.from(await webcrypto.subtle.exportKey("pkcs8",pair.privateKey)).toString("base64")}\n-----END PRIVATE KEY-----`;})(),
+        APPLE_BROWSER_REDIRECT_URI: "https://ec1.local/api/auth/browser/apple/callback",
+        GOOGLE_BROWSER_CLIENT_ID: "browser-google",
+        GOOGLE_BROWSER_CLIENT_SECRET: "synthetic-browser-secret",
+        GOOGLE_BROWSER_REDIRECT_URI: "https://ec1.local/api/auth/browser/google/callback",
         GOOGLE_EDITOR_CLIENT_ID: "ec1-editor-fixture",
         GOOGLE_EDITOR_CLIENT_SECRET: "synthetic-editor-secret",
         GOOGLE_EDITOR_REDIRECT_URIS:
@@ -82,10 +91,27 @@ before(async () => {
         requests.push(request.url);
         if (providerUnavailable)
           return new Response("fixture outage", { status: 503 });
+        if (request.url === "https://appleid.apple.com/auth/token") {
+          const form=new URLSearchParams(await request.text());
+          assert.equal(form.get("client_id"),"browser-apple");
+          const secretParts=form.get("client_secret").split(".");
+          assert.equal(JSON.parse(Buffer.from(secretParts[0],"base64url")).alg,"ES256");
+          assert.equal(JSON.parse(Buffer.from(secretParts[1],"base64url")).sub,"browser-apple");
+          assert.equal(Buffer.from(secretParts[2],"base64url").length,64);
+          assert.equal(form.has("code_verifier"),false);
+          return new Response(JSON.stringify({id_token:editorIdToken}));
+        }
+        if (request.url === "https://appleid.apple.com/auth/keys") return new Response(JSON.stringify({ keys: [jwk] }));
         if (request.url === "https://www.googleapis.com/oauth2/v3/certs")
           return new Response(JSON.stringify({ keys: [jwk] }));
         if (request.url === "https://oauth2.googleapis.com/token") {
           const form = new URLSearchParams(await request.text());
+          if (form.get("client_id") === "browser-google") {
+            assert.equal(form.get("client_secret"), "synthetic-browser-secret");
+            assert.equal(form.get("redirect_uri"), "https://ec1.local/api/auth/browser/google/callback");
+            assert.match(form.get("code_verifier"), /^[A-Za-z0-9_-]{43}$/);
+            return new Response(JSON.stringify({ id_token: editorIdToken }));
+          }
           assert.equal(form.get("client_id"), "ec1-editor-fixture");
           assert.equal(form.get("client_secret"), "synthetic-editor-secret");
           assert.equal(
@@ -100,6 +126,11 @@ before(async () => {
         }
         if (request.url === "https://discord.com/api/oauth2/token") {
           const form = new URLSearchParams(await request.text());
+          if(browserDiscord) {
+            assert.equal(form.get("redirect_uri"),"https://test.local/api/auth/discord/callback");
+            assert.match(form.get("code_verifier"),/^[A-Za-z0-9_-]{43}$/);
+            return new Response(JSON.stringify({access_token:"synthetic-discord-bearer"}));
+          }
           assert.equal(
             form.get("code_verifier"),
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq",
@@ -139,7 +170,7 @@ before(async () => {
     }),
   );
   db = await mf.getD1Database("DB");
-  for (const file of ["001_auth.sql", "021_device_credentials.sql"])
+  for (const file of ["001_auth.sql", "021_device_credentials.sql", "024_browser_auth.sql"])
     for (const statement of (await readFile("migrations/" + file, "utf8"))
       .split(";")
       .map((s) => s.trim())
@@ -744,7 +775,7 @@ test("provider proofs require issuer/audience/nonce; explicit signin never creat
     challengeId: challenge.challengeId,
     idToken: await token(claims),
   });
-  assert.equal(signin.error, "identity_not_registered");
+  assert.equal(signin.error, "legacy_google_browser_required");
   const createChallenge = await request("/api/auth/provider/google/challenge", {
     intent: "create",
   });
@@ -1081,7 +1112,8 @@ test("legacy proof helper mints restricted scope and durable linking permits nat
       "legacy_identity_mismatch",
     );
   } finally {
-    legacyMismatch = false;
+    legacyMismatch = false,
+  browserDiscord = false;
   }
   const linked = await request(
     "/api/auth/link/email",
@@ -1273,6 +1305,95 @@ test("expired nonce fails before provider fetch, and cleanup purges only bounded
     activeBefore,
   );
 });
+test("Google browser callback exchanges proof server-side and binds ticket to verifier", async () => {
+  const verifier = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq";
+  const codeChallenge = b64(new Uint8Array(await webcrypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  const challenge = await request("/api/auth/provider/google/challenge", {intent:"create",transport:"browser",codeChallenge});
+  assert.equal(challenge.status,200);
+  assert.equal(challenge.transport,"browser");
+  const authorize = new URL(challenge.authorizeUrl);
+  assert.equal(authorize.searchParams.get("client_id"),"browser-google");
+  assert.notEqual(authorize.searchParams.get("code_challenge"),codeChallenge);
+  const pollBody = {challengeId:challenge.challengeId,state:challenge.state,codeVerifier:verifier};
+  assert.equal((await request("/api/auth/browser/google/poll",pollBody)).pending,true);
+  editorIdToken = await token({iss:"https://accounts.google.com",aud:"browser-google",sub:"synthetic-browser-player",nonce:challenge.nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300});
+  const callback = await mf.dispatchFetch(`https://ec1.local/api/auth/browser/google/callback?state=${challenge.state}&code=synthetic-browser-code`,{redirect:"manual",headers:{"User-Agent":"Mozilla/5.0 (Linux; Android 15)"}});
+  assert.equal(callback.status,303);
+  const target = new URL(callback.headers.get("location"));
+  assert.equal(target.origin,"null");
+  assert.equal(target.protocol,"gacogames-ec1-bridge:");
+  assert.equal(target.searchParams.has("code"),false);
+  assert.equal(target.searchParams.has("id_token"),false);
+  const ticket = target.searchParams.get("ticket");
+  assert.ok(ticket);
+  assert.equal((await request("/api/auth/browser/google/poll",pollBody)).ticket,ticket);
+  const proof = {...pollBody,intent:"create",ticket,...boot("browser-google")};
+  assert.equal((await request("/api/auth/provider/google",{...proof,codeVerifier:verifier+"X"})).error,"invalid_state_or_pkce");
+  const created = await request("/api/auth/provider/google",proof);
+  assert.equal(created.status,200);
+  assert.equal((await request("/api/auth/provider/google",proof)).playerId,created.playerId);
+  assert.equal((await request("/api/auth/provider/google",{...proof,...boot("ticket-replay-other")})).error,"invalid_or_used_challenge");
+  const duplicate = await mf.dispatchFetch(`https://ec1.local/api/auth/browser/google/callback?state=${challenge.state}&code=other`,{redirect:"manual",headers:{"User-Agent":"Mozilla/5.0 (Linux; Android 15)"}});
+  assert.equal(duplicate.status,401);
+  const row = await db.prepare("SELECT * FROM auth_challenge WHERE id=?").bind(challenge.challengeId).first();
+  assert.equal(JSON.stringify(row).includes(ticket),false);
+  assert.equal(JSON.stringify(row).includes(editorIdToken),false);
+});
+
+test("Apple browser uses form_post, server ES256 secret and exact Services audience; Discord broker preserves registered callback", async()=> {
+  const verifier="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq";
+  const codeChallenge=b64(new Uint8Array(await webcrypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier))));
+  for(const provider of ["apple","discord"]) {
+    const challenge=await request(`/api/auth/provider/${provider}/challenge`,{intent:"signin",transport:"browser",codeChallenge});
+    assert.equal(challenge.status,200);
+    const authorize=new URL(challenge.authorizeUrl);
+    if(provider==="apple") {
+      assert.equal(authorize.searchParams.get("response_mode"),"form_post");
+      editorIdToken=await token({iss:"https://appleid.apple.com",aud:"browser-apple",sub:"synthetic-browser-apple",nonce:challenge.nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300});
+      assert.equal((await mf.dispatchFetch(`https://ec1.local/api/auth/browser/apple/callback?state=${challenge.state}&code=x`)).status,400);
+    }
+    browserDiscord=provider==="discord";
+    const callback=await mf.dispatchFetch(provider==="apple" ? "https://ec1.local/api/auth/browser/apple/callback" : `https://test.local/api/auth/discord/callback?state=${challenge.state}&code=synthetic`,provider==="apple" ? {method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","User-Agent":"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)"},body:new URLSearchParams({state:challenge.state,code:"synthetic"}),redirect:"manual"} : {redirect:"manual",headers:{"User-Agent":"Mozilla/5.0 (Linux; Android 15)"}});
+    assert.equal(callback.status,303);
+    const ticket=new URL(callback.headers.get("location")).searchParams.get("ticket");
+    assert.ok(ticket);
+    const result=await request(`/api/auth/provider/${provider}`,{intent:"signin",challengeId:challenge.state,state:challenge.state,ticket,codeVerifier:verifier});
+    assert.equal(result.error,provider==="apple" ? "identity_not_registered" : undefined);
+    if(provider==="discord") assert.equal(result.status,200);
+  }
+  browserDiscord=false;
+});
+
+test("browser cancellation and wrong-audience callback never create a ticket or account",async()=> {
+  const verifier="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq";
+  const codeChallenge=b64(new Uint8Array(await webcrypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier))));
+  const before=(await db.prepare("SELECT count(*) n FROM player").first()).n;
+  for(const mode of ["cancel","wrongAudience"]) {
+    const challenge=await request("/api/auth/provider/google/challenge",{intent:"create",transport:"browser",codeChallenge});
+    if(mode==="wrongAudience") editorIdToken=await token({iss:"https://accounts.google.com",aud:"ec1-google-fixture",sub:"no-browser-account",nonce:challenge.nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300});
+    const callback=await mf.dispatchFetch(`https://ec1.local/api/auth/browser/google/callback?state=${challenge.state}&${mode==="cancel" ? "error=access_denied" : "code=synthetic"}`,{redirect:"manual",headers:{"User-Agent":"Mozilla/5.0 (Linux; Android 15)"}});
+    assert.equal(callback.status,303);
+    const query=new URL(callback.headers.get("location")).searchParams;
+    assert.equal(query.has("ticket"),false);
+    assert.equal(query.get("error"),mode==="cancel" ? "access_denied" : "invalid_provider_proof");
+    const poll=await request("/api/auth/browser/google/poll",{challengeId:challenge.state,state:challenge.state,codeVerifier:verifier});
+    assert.equal(poll.error,query.get("error"));
+    assert.equal(poll.ticket,undefined);
+  }
+  assert.equal((await db.prepare("SELECT count(*) n FROM player").first()).n,before);
+});
+
+test("desktop cancellation completion stays in browser and preserves game polling",async()=> {
+  const verifier="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq";
+  const codeChallenge=b64(new Uint8Array(await webcrypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier))));
+  const challenge=await request("/api/auth/provider/google/challenge",{intent:"signin",transport:"browser",codeChallenge});
+  const response=await mf.dispatchFetch(`https://ec1.local/api/auth/browser/google/callback?state=${challenge.state}&error=access_denied`,{redirect:"manual",headers:{"User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X) Safari/605.1.15"}});
+  assert.equal(response.status,200);assert.equal(response.headers.get("location"),null);
+  assert.match(await response.text(),/Return to Epic Conquest/);
+  const poll=await request("/api/auth/browser/google/poll",{challengeId:challenge.state,state:challenge.state,codeVerifier:verifier});
+  assert.equal(poll.error,"access_denied");assert.equal(poll.ticket,undefined);
+});
+
 test("database outages do not masquerade as missing credentials or call PlayFab", async () => {
   const outbound = requests.length;
   await db.prepare("DROP TABLE auth_identity").run();

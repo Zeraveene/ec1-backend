@@ -8,6 +8,7 @@ preview_urls = false
 routes = [
   { pattern = "ec1mod.codezrv.com", custom_domain = true },
   { pattern = "ec1.gacogames.com", custom_domain = true },
+  { pattern = "ec2mod.codezrv.com/api/classic-admin/*", zone_name = "codezrv.com" },
 ]
 
 [assets]
@@ -18,8 +19,21 @@ not_found_handling = "single-page-application"
 
 [vars]
 ENVIRONMENT = "production-preparation"
+CLASSIC_ADMIN_ORIGIN = "https://ec2mod.codezrv.com"
+# Existing EC1 PlayFab Web App public audience; native Android package/signing verified.
+GOOGLE_CLIENT_IDS = "1078144059071-56j0to4phj699691rg0j87iuupd75e1k.apps.googleusercontent.com"
+# Native Sign in with Apple ID-token audience; no web Services ID or private key required.
+APPLE_CLIENT_IDS = "com.gacogames.epiccon"
+# Dedicated confidential browser clients; private credentials use Worker secret bindings.
+GOOGLE_BROWSER_CLIENT_ID = "1078144059071-3blfmsc8s3m7vh2g251hjfftkm6hdc9t.apps.googleusercontent.com"
+GOOGLE_BROWSER_REDIRECT_URI = "https://ec1mod.codezrv.com/api/auth/browser/google/callback"
+APPLE_BROWSER_CLIENT_ID = "com.gacogames.epiccon.auth"
+APPLE_BROWSER_TEAM_ID = "32ST5862ML"
+APPLE_BROWSER_KEY_ID = "6GN787AK68"
+APPLE_BROWSER_REDIRECT_URI = "https://ec1mod.codezrv.com/api/auth/browser/apple/callback"
 ALLOW_NEW_ACCOUNTS = "false"
-LEGACY_MIGRATION_ENABLED = "false"
+LEGACY_MIGRATION_ENABLED = "true"
+EC1_MANUAL_BACKUPS_ENABLED = "true"
 PLAYFAB_TITLE_ID = "3BFE7"
 RECOVERY_ENABLED = "false"
 IAP_PURCHASES_ENABLED = "false"
@@ -37,6 +51,10 @@ DISCORD_GAME_REDIRECT_URIS = "https://ec1mod.codezrv.com/api/auth/discord/callba
 binding = "ADMIN_AUTHORITY"
 service = "epicon2-moderation-tool"
 entrypoint = "AdminAuthority"
+
+[[services]]
+binding = "EC2_ADMIN_SESSION"
+service = "epicon2-moderation-tool"
 
 [triggers]
 crons = ["0 * * * *"]

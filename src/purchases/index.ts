@@ -126,6 +126,10 @@ export function createPurchasesApp() {
     }),
   );
   app.post("/claim", async (c) => {
+    // The legacy delivery path publishes gameplay saves. Keep checkout disabled in manual-backup mode
+    // until independent durable grant receipts and client delivery acknowledgement exist.
+    if (c.env.EC1_MANUAL_BACKUPS_ENABLED === "true")
+      throw new PurchaseError("manual_purchase_delivery_not_ready", 503);
     if (c.env.IAP_PURCHASES_ENABLED !== "true")
       throw new PurchaseError("purchases_disabled", 503);
     await rateLimit(

@@ -34,7 +34,7 @@ export async function rateLimit(
 export async function cleanupAuthState(env: Env, limit = 100) {
   const bounded = Math.max(1, Math.min(500, Math.floor(limit))),
     time = now();
-  return env.DB.batch([
+  const statements = [
     env.DB.prepare(
       "DELETE FROM auth_rate_limit WHERE bucket IN(SELECT bucket FROM auth_rate_limit WHERE expires_at<=? ORDER BY expires_at LIMIT ?)",
     ).bind(time, bounded),
@@ -47,5 +47,9 @@ export async function cleanupAuthState(env: Env, limit = 100) {
     env.DB.prepare(
       "DELETE FROM auth_session WHERE id IN(SELECT s.id FROM auth_session s WHERE s.expires_at<=? AND NOT EXISTS(SELECT 1 FROM auth_refresh r WHERE r.session_id=s.id) ORDER BY s.expires_at LIMIT ?)",
     ).bind(time, bounded),
-  ]);
+  ];
+  // Additive deployments and older test databases may predate legacy cutover.
+  if (await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='classic_auth_proof'").first())
+    statements.push(env.DB.prepare("DELETE FROM classic_auth_proof WHERE id IN(SELECT id FROM classic_auth_proof WHERE expires_at<=? ORDER BY expires_at LIMIT ?)").bind(time, bounded));
+  return env.DB.batch(statements);
 }
