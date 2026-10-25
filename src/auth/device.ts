@@ -117,3 +117,26 @@ export async function activeDeviceSession(
       .first())
   );
 }
+
+/** Proof-only revocation remains usable after access/refresh expiry or a ban. */
+export async function forgetDevice(env: Env, credential: DeviceCredential): Promise<void> {
+  const row = await env.DB.prepare(
+    "SELECT player_id,secret_hash,device_id FROM auth_device_credential WHERE id=?",
+  ).bind(credential.id).first<{ player_id: string; secret_hash: string; device_id: string }>();
+  // A missing credential has already been forgotten; never interpret DB failures as absence.
+  if (!row) return;
+  if (row.secret_hash !== credential.secretHash || row.device_id !== credential.deviceId)
+    throw new AuthError("invalid_device_credentials", 401);
+  const time = now();
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE auth_device_credential SET revoked_at=COALESCE(revoked_at,?) WHERE id=? AND player_id=? AND secret_hash=? AND device_id=?",
+    ).bind(time, credential.id, row.player_id, credential.secretHash, credential.deviceId),
+    env.DB.prepare(
+      "UPDATE auth_session SET revoked_at=COALESCE(revoked_at,?) WHERE device_credential_id=? AND player_id=?",
+    ).bind(time, credential.id, row.player_id),
+    env.DB.prepare(
+      "DELETE FROM auth_refresh WHERE session_id IN(SELECT id FROM auth_session WHERE device_credential_id=? AND player_id=?)",
+    ).bind(credential.id, row.player_id),
+  ]);
+}

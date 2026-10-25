@@ -20,6 +20,7 @@ import {
   activeDeviceSession,
   credentialOwner,
   deviceInsert,
+  forgetDevice,
   hasDeviceCredential,
   parseDeviceCredential,
   type DeviceCredential,
@@ -556,6 +557,12 @@ export function createAuthApp() {
     ).run();
     return c.json(session);
   });
+  app.post("/device/forget", async (c) => {
+    const credential = (await parseDeviceCredential(await body(c)))!;
+    await rateLimit(c.env, "device-credential-forget", credential.id, 15);
+    await forgetDevice(c.env, credential);
+    return c.json({ status: "ok" });
+  });
   app.post("/link/device", requirePlayer, async (c) => {
     const b = await body(c),
       credential = (await parseDeviceCredential(b))!,
@@ -772,7 +779,7 @@ export function createAuthApp() {
       identities: (
         await stmt(
           c.env,
-          "SELECT provider,created_at FROM auth_identity WHERE player_id=?",
+          "SELECT provider,created_at,CASE WHEN provider='email' THEN subject ELSE display_email END AS email FROM auth_identity WHERE player_id=?",
           c.get("player").playerId,
         ).all()
       ).results,
@@ -924,7 +931,7 @@ function wireProviders(app: Hono<AppEnv>) {
         )
           throw new AuthError("invalid_redirect_or_pkce");
       }
-      authorizeUrl = `${google ? "https://accounts.google.com/o/oauth2/v2/auth" : "https://discord.com/oauth2/authorize"}?${new URLSearchParams({ client_id: google ? c.env.GOOGLE_EDITOR_CLIENT_ID! : c.env.DISCORD_GAME_CLIENT_ID!, response_type: "code", scope: google ? "openid email" : "identify", redirect_uri: redirect, state: id, code_challenge: challenge, code_challenge_method: "S256", ...(google ? { nonce, prompt: "select_account" } : {}) })}`;
+      authorizeUrl = `${google ? "https://accounts.google.com/o/oauth2/v2/auth" : "https://discord.com/oauth2/authorize"}?${new URLSearchParams({ client_id: google ? c.env.GOOGLE_EDITOR_CLIENT_ID! : c.env.DISCORD_GAME_CLIENT_ID!, response_type: "code", scope: google ? "openid email" : "identify email", redirect_uri: redirect, state: id, code_challenge: challenge, code_challenge_method: "S256", ...(google ? { nonce, prompt: "select_account" } : {}) })}`;
     }
     await stmt(
       c.env,
@@ -961,6 +968,7 @@ function wireProviders(app: Hono<AppEnv>) {
       used_at: number | null;
       proof_hash: string | null;
       verified_subject: string | null;
+      verified_email: string | null;
       browser_transport: number;
       browser_subject: string | null;
       browser_ticket_hash: string | null;
@@ -1003,6 +1011,7 @@ function wireProviders(app: Hono<AppEnv>) {
       }),
     );
     let subject: string;
+    let displayEmail = challenge.verified_email;
     if (challenge.used_at) {
       if (
         challenge.proof_hash !== requestHash ||
@@ -1013,7 +1022,11 @@ function wireProviders(app: Hono<AppEnv>) {
       subject = challenge.verified_subject;
     } else {
       try {
-        subject = challenge.browser_transport ? challenge.browser_subject! : await providerProof(c.env, provider, b, challenge.nonce);
+        const proof = challenge.browser_transport
+          ? { subject: challenge.browser_subject!, email: challenge.verified_email }
+          : await providerProof(c.env, provider, b, challenge.nonce);
+        subject = proof.subject;
+        displayEmail = proof.email;
       } catch (error) {
         if (error instanceof TypeError || error instanceof DOMException)
           throw new AuthError("provider_unavailable", 503);
@@ -1021,10 +1034,11 @@ function wireProviders(app: Hono<AppEnv>) {
       }
       const consumed = await stmt(
         c.env,
-        "UPDATE auth_challenge SET used_at=?,proof_hash=?,verified_subject=? WHERE id=? AND used_at IS NULL",
+        "UPDATE auth_challenge SET used_at=?,proof_hash=?,verified_subject=?,verified_email=? WHERE id=? AND used_at IS NULL",
         now(),
         requestHash,
         subject,
+        displayEmail,
         challengeId,
       ).run();
       if (!consumed.meta.changes) {
@@ -1040,6 +1054,13 @@ function wireProviders(app: Hono<AppEnv>) {
           throw new AuthError("invalid_or_used_challenge", 401);
       }
     }
+    const finish = async (result: Awaited<ReturnType<typeof openSession>>) => {
+      await stmt(c.env,
+        "UPDATE auth_identity SET display_email=COALESCE((SELECT verified_email FROM auth_challenge WHERE id=? AND proof_hash=? AND verified_subject=?),display_email) WHERE provider=? AND subject=? AND player_id=?",
+        challengeId, requestHash, subject, provider, subject, result.playerId,
+      ).run();
+      return result;
+    };
     const identity = await stmt(
       c.env,
       "SELECT player_id,password_hash,salt,created_at FROM auth_identity WHERE provider=? AND subject=?",
@@ -1047,7 +1068,7 @@ function wireProviders(app: Hono<AppEnv>) {
       subject,
     ).first<{ player_id: string; password_hash: string | null; salt: string | null; created_at: number }>();
     if (intent === "create")
-      return c.json(await create(c.env, b, provider, subject));
+      return c.json(await finish(await create(c.env, b, provider, subject)));
     if (intent === "signin") {
       if (!identity) {
         if (provider === "google" && c.env.LEGACY_MIGRATION_ENABLED === "true") {
@@ -1057,7 +1078,7 @@ function wireProviders(app: Hono<AppEnv>) {
         throw new AuthError("identity_not_registered", 404);
       }
       return c.json(
-        await openSession(
+        await finish(await openSession(
           c.env,
           identity.player_id,
           provider,
@@ -1067,7 +1088,7 @@ function wireProviders(app: Hono<AppEnv>) {
           undefined,
           { subject, passwordHash: identity.password_hash, salt: identity.salt, createdAt: identity.created_at,
             challenge: { id: challengeId, requestHash, intent } },
-        ),
+        )),
       );
     }
     if (intent !== "link" || !owner) throw new AuthError("invalid_intent");
@@ -1112,7 +1133,7 @@ function wireProviders(app: Hono<AppEnv>) {
     if (linked?.player_id !== owner.player_id)
       throw new AuthError("identity_link_conflict", 409);
     return c.json(
-      await openSession(
+      await finish(await openSession(
         c.env,
         owner.player_id,
         provider,
@@ -1122,7 +1143,7 @@ function wireProviders(app: Hono<AppEnv>) {
         undefined,
         { subject, passwordHash: linked.password_hash, salt: linked.salt, createdAt: linked.created_at,
           ownerSessionId: owner.id, challenge: { id: challengeId, requestHash, intent } },
-      ),
+      )),
     );
   });
   app.post("/link/email", requirePlayer, async (c) => {

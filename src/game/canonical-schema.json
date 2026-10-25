@@ -1,5 +1,6 @@
 {
   "GameSaveRecord": {
+    "appliedPurchaseGrants": "List<string>",
     "schemaVersion": "int",
     "progress": "ProgressSaveRecord",
     "characters": "List<CharacterSaveRecord>",
@@ -158,6 +159,12 @@
   "PreferenceSaveRecord": {
     "integers": "Dictionary<string, int>",
     "language": "string"
+  },
+  "SaveOwnershipRecord": {
+    "saveId": "string",
+    "playerId": "string",
+    "displayName": "string",
+    "proof": "string"
   },
   "EquipmentRecord": {
     "id": "string",

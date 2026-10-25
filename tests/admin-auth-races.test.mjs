@@ -56,14 +56,14 @@ export default app;
     return Response.json({keys:[jwk]});
   }}));
   db = await mf.getD1Database('DB'); worker = await mf.getWorker();
-  for(const file of ['001_auth.sql','003_admin.sql','010_recovery.sql','021_device_credentials.sql','022_admin_identity.sql'])for(const sql of (await readFile(`migrations/${file}`,'utf8')).split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run();
+  for(const file of ['001_auth.sql','003_admin.sql','010_recovery.sql','021_device_credentials.sql','022_admin_identity.sql','031_identity_display_email.sql'])for(const sql of (await readFile(`migrations/${file}`,'utf8')).split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run();
 });
 after(async()=>mf?.dispose());
 async function request(path,body,token,race){const response=await worker.fetch('https://synthetic.test'+path,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{}),...(race?{'X-Test-Race':JSON.stringify(race)}:{})},body:JSON.stringify(body)});const result={status:response.status,body:await response.json()};if(race)assert.equal(response.headers.get('X-Test-Race-Fired'),'1','production path reached the intended race barrier');return result;}
 async function fixture({email=true,google=false,apple=true}={}){
   const n=++sequence,id='race-player-'+n,destination='race-destination-'+n,subject=`race${n}@example.test`;
   for(const pid of [id,destination])await db.prepare('INSERT INTO player(id,created_at,updated_at) VALUES (?,1,1)').bind(pid).run();
-  if(email){const salt=randomBytes(32).toString('base64url'),digest=pbkdf2Sync(password,Buffer.from(salt,'base64url'),100000,32,'sha256').toString('base64url');await db.prepare("INSERT INTO auth_identity VALUES ('email',?,?,?,?,1)").bind(subject,id,digest,salt).run();}
+  if(email){const salt=randomBytes(32).toString('base64url'),digest=pbkdf2Sync(password,Buffer.from(salt,'base64url'),100000,32,'sha256').toString('base64url');await db.prepare("INSERT INTO auth_identity(provider,subject,player_id,password_hash,salt,created_at) VALUES ('email',?,?,?,?,1)").bind(subject,id,digest,salt).run();}
   if(google)await db.prepare("INSERT INTO auth_identity(provider,subject,player_id,created_at) VALUES ('google',?,?,1)").bind('google-'+n,id).run();
   if(apple)await db.prepare("INSERT INTO auth_identity(provider,subject,player_id,created_at) VALUES ('apple',?,?,1)").bind('apple-'+n,id).run();
   return {id,destination,subject,googleSubject:'google-'+n,n};

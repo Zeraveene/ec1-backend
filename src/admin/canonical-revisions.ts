@@ -2,7 +2,7 @@ import type { Env } from '../env';
 import { AdminActionError, requireWriter, type AdminActor } from './action-types';
 import { validateCanonicalSnapshot } from '../game/backups';
 import { sha256, stableJson } from '../game/validation';
-type Row={revision:number;sha256:string;bytes:number;schema_version:number;playtime:number;created_at:number;r2_key:string;operation_id:string;request_hash:string;source:string;restored_from:number|null};
+type Row={revision:number;sha256:string;bytes:number;schema_version:number;playtime:number;created_at:number;r2_key:string;operation_id:string;request_hash:string;source:string;restored_from:number|null;save_id?:string|null};
 const meta=(r:Row)=>({format:'canonical',version:r.revision,revision:r.revision,sha256:r.sha256,bytes:r.bytes,schemaVersion:r.schema_version,playtime:r.playtime,createdAt:r.created_at,operationId:r.operation_id,source:r.source,restoredFrom:r.restored_from});
 function argsId(args:Record<string,unknown>){if(typeof args.id!=='string'||!args.id||args.id.length>256)throw new AdminActionError('invalid_player_id');return args.id;}
 function version(v:unknown){if(!Number.isSafeInteger(v)||Number(v)<1)throw new AdminActionError('invalid_version');return Number(v);}
@@ -24,7 +24,7 @@ export async function canonicalRevisionRestore(env:Env,actor:AdminActor,args:Rec
  await env.PLAYER_SAVES.put(key,content,{httpMetadata:{contentType:'application/json'}});const staged=await env.PLAYER_SAVES.get(key);if(!staged||await sha256(await staged.text())!==source.sha256)throw new AdminActionError('revision_integrity_unavailable',503);
  const n=Number(expected)+1,now=Date.now();
  try{await env.DB.batch([
- env.DB.prepare("INSERT INTO classic_backup_revision(player_id,revision,r2_key,sha256,bytes,schema_version,playtime,created_at,operation_id,request_hash,source,restored_from) SELECT ?,?,?,?,?,?,?,?,?,?,'admin_restore',? WHERE COALESCE((SELECT revision FROM classic_backup_head WHERE player_id=?),0)=?").bind(id,n,key,source.sha256,source.bytes,source.schema_version,source.playtime,now,args.operationId,requestHash,sourceVersion,id,expected),
+ env.DB.prepare("INSERT INTO classic_backup_revision(player_id,revision,r2_key,sha256,bytes,schema_version,playtime,created_at,operation_id,request_hash,source,restored_from,save_id) SELECT ?,?,?,?,?,?,?,?,?,?,'admin_restore',?,? WHERE COALESCE((SELECT revision FROM classic_backup_head WHERE player_id=?),0)=?").bind(id,n,key,source.sha256,source.bytes,source.schema_version,source.playtime,now,args.operationId,requestHash,sourceVersion,source.save_id??null,id,expected),
  env.DB.prepare('UPDATE classic_backup_head SET revision=? WHERE player_id=? AND revision=? AND EXISTS(SELECT 1 FROM classic_backup_revision WHERE player_id=? AND revision=? AND operation_id=? AND request_hash=?)').bind(n,id,expected,id,n,args.operationId,requestHash),
  env.DB.prepare("INSERT INTO admin_audit(id,actor_id,actor_name,action,player_id,detail_json,created_at) SELECT ?,?,?,'canonical_backup.restore',player_id,?,? FROM classic_backup_revision WHERE player_id=? AND revision=? AND operation_id=? AND request_hash=?").bind(auditId,actor.id,actor.name,stableJson(detail),now,id,n,args.operationId,requestHash)
  ]);}catch{const committed=await replay();if(committed)return result(committed);if(await head(env,id)!==expected)throw new AdminActionError('save_conflict',409);throw new AdminActionError('save_publication_unavailable',503);}

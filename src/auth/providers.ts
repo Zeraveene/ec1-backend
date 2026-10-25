@@ -8,12 +8,20 @@ export class AuthError extends Error {
     super(code);
   }
 }
+// Provider email is display metadata only; provider + subject remains the identity key.
+export interface ProviderProof { subject: string; email: string | null }
+function verifiedEmail(value: unknown, verified: unknown): string | null {
+  if (verified !== true && verified !== "true") return null;
+  if (typeof value !== "string") return null;
+  const email = value.trim().toLowerCase();
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
 export async function providerProof(
   env: Env,
   provider: string,
   input: Record<string, unknown>,
   nonce: string,
-): Promise<string> {
+): Promise<ProviderProof> {
   let exchangedGoogleCode = false;
   // Editor code flow exchanges only on the server, then uses the same signed JWT,
   // audience and per-attempt nonce verification as the native Google path.
@@ -120,9 +128,9 @@ export async function providerProof(
       headers: { Authorization: `Bearer ${token.access_token}` },
     });
     if (!me.ok) throw new AuthError("provider_unavailable", 503);
-    const user = (await me.json()) as { id?: string };
+    const user = (await me.json()) as { id?: string; email?: string; verified?: boolean };
     if (!user.id) throw new AuthError("invalid_provider_proof", 401);
-    return user.id;
+    return { subject: user.id, email: verifiedEmail(user.email, user.verified) };
   }
   if (provider !== "google" && provider !== "apple")
     throw new AuthError("unsupported_provider");
@@ -197,7 +205,7 @@ export async function providerProof(
       payload.nonce !== nonce
     )
       throw new Error();
-    return payload.sub;
+    return { subject: payload.sub, email: verifiedEmail(payload.email, payload.email_verified) };
   } catch (error) {
     if (error instanceof AuthError) throw error;
     if (

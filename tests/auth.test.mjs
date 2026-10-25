@@ -146,7 +146,7 @@ before(async () => {
             "Bearer synthetic-discord-bearer",
           );
           return new Response(
-            JSON.stringify({ id: "discord-synthetic-subject" }),
+            JSON.stringify({ id: "discord-synthetic-subject", email: "discord@fixture.invalid", verified: true }),
           );
         }
         if (
@@ -170,7 +170,7 @@ before(async () => {
     }),
   );
   db = await mf.getD1Database("DB");
-  for (const file of ["001_auth.sql", "021_device_credentials.sql", "024_browser_auth.sql"])
+  for (const file of ["001_auth.sql", "021_device_credentials.sql", "024_browser_auth.sql", "031_identity_display_email.sql"])
     for (const statement of (await readFile("migrations/" + file, "utf8"))
       .split(";")
       .map((s) => s.trim())
@@ -404,6 +404,56 @@ test("device bindings never transfer between players; concurrent same-owner link
     (await request("/api/auth/device/login", second)).error,
     "player_banned",
   );
+});
+
+test("forget device is proof-only, idempotent after expiry, and revokes only the proved installation", async () => {
+  const before = requests.length;
+  const owner = await request("/api/auth/guest", boot("forget-device-owner"));
+  const other = await request("/api/auth/guest", boot("forget-device-other"));
+  const proof = device("forget-primary"), second = device("forget-secondary"), foreign = device("forget-foreign");
+  const remembered = await request("/api/auth/link/device", proof, owner.accessToken);
+  const sameDevice = await request("/api/auth/device/login", proof);
+  const secondSession = await request("/api/auth/link/device", second, owner.accessToken);
+  const foreignSession = await request("/api/auth/link/device", foreign, other.accessToken);
+  assert.equal((await request("/api/auth/device/forget", {...proof,deviceSecret:"Y".repeat(43)},other.accessToken)).status,401);
+  assert.equal((await request("/api/auth/device/forget", {...proof,deviceId:"wrong-installation-identity"})).status,401);
+  assert.equal((await request("/protected",null,remembered.accessToken,"GET")).status,200);
+  // The original owner session may have expired before explicit sign-out.
+  await db.prepare("UPDATE auth_session SET expires_at=1 WHERE player_id=? AND provider='guest'").bind(owner.playerId).run();
+  const [forgotten, racedLogin] = await Promise.all([
+    request("/api/auth/device/forget",proof,owner.accessToken),
+    request("/api/auth/device/login",proof),
+  ]);
+  assert.equal(forgotten.status,"ok");
+  if(racedLogin.accessToken)
+    assert.equal((await request("/protected",null,racedLogin.accessToken,"GET")).status,401);
+  else assert.equal(racedLogin.error,"invalid_device_credentials");
+  assert.deepEqual(await request("/api/auth/device/forget",proof),{status:"ok"});
+  for(const session of [remembered,sameDevice]) {
+    assert.equal((await request("/protected",null,session.accessToken,"GET")).status,401);
+    assert.equal((await request("/api/auth/refresh",{refreshToken:session.refreshToken,operationId:"forgotten-refresh"})).status,401);
+  }
+  assert.equal((await request("/api/auth/device/login",proof)).error,"invalid_device_credentials");
+  assert.equal((await request("/protected",null,secondSession.accessToken,"GET")).status,200);
+  assert.equal((await request("/protected",null,foreignSession.accessToken,"GET")).status,200);
+  assert.equal((await request("/api/auth/link/device",proof,secondSession.accessToken)).error,"device_credential_conflict");
+  assert.equal((await request("/api/auth/device/forget",device("forget-unknown"))).status,"ok");
+  assert.equal((await request("/api/auth/device/forget",{...proof,deviceSecret:"short"})).error,"invalid_device_credential");
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM auth_refresh r JOIN auth_session s ON s.id=r.session_id WHERE s.device_credential_id=?").bind(proof.deviceCredentialId).first()).n,0);
+  assert.equal(requests.length,before);
+  await db.prepare("DELETE FROM auth_rate_limit").run();
+});
+
+test("forget device works after the remembered session and refresh expire",async()=>{
+  const proof=device("forget-expired");
+  const owner=await request("/api/auth/guest",{...boot("forget-expired-owner"),...proof});
+  const session=await request("/api/auth/device/login",proof);
+  await db.prepare("UPDATE auth_session SET expires_at=1 WHERE player_id=?").bind(owner.playerId).run();
+  await db.prepare("UPDATE auth_refresh SET expires_at=1 WHERE session_id IN(SELECT id FROM auth_session WHERE player_id=?)").bind(owner.playerId).run();
+  const forgotten=await request("/api/auth/device/forget",proof,session.accessToken);
+  assert.equal(forgotten.status,"ok");
+  assert.equal((await request("/api/auth/device/login",proof)).error,"invalid_device_credentials");
+  await db.prepare("DELETE FROM auth_rate_limit").run();
 });
 
 test("unknown device signin has a bounded credential attempt cap and creates no profile or source request", async () => {
@@ -1316,7 +1366,7 @@ test("Google browser callback exchanges proof server-side and binds ticket to ve
   assert.notEqual(authorize.searchParams.get("code_challenge"),codeChallenge);
   const pollBody = {challengeId:challenge.challengeId,state:challenge.state,codeVerifier:verifier};
   assert.equal((await request("/api/auth/browser/google/poll",pollBody)).pending,true);
-  editorIdToken = await token({iss:"https://accounts.google.com",aud:"browser-google",sub:"synthetic-browser-player",nonce:challenge.nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300});
+  editorIdToken = await token({iss:"https://accounts.google.com",aud:"browser-google",sub:"synthetic-browser-player",email:"browser@fixture.invalid",email_verified:true,nonce:challenge.nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300});
   const callback = await mf.dispatchFetch(`https://ec1.local/api/auth/browser/google/callback?state=${challenge.state}&code=synthetic-browser-code`,{redirect:"manual",headers:{"User-Agent":"Mozilla/5.0 (Linux; Android 15)"}});
   assert.equal(callback.status,303);
   const target = new URL(callback.headers.get("location"));
@@ -1331,6 +1381,7 @@ test("Google browser callback exchanges proof server-side and binds ticket to ve
   assert.equal((await request("/api/auth/provider/google",{...proof,codeVerifier:verifier+"X"})).error,"invalid_state_or_pkce");
   const created = await request("/api/auth/provider/google",proof);
   assert.equal(created.status,200);
+  assert.equal((await request("/api/auth/identities",null,created.accessToken,"GET")).identities[0].email,"browser@fixture.invalid");
   assert.equal((await request("/api/auth/provider/google",proof)).playerId,created.playerId);
   assert.equal((await request("/api/auth/provider/google",{...proof,...boot("ticket-replay-other")})).error,"invalid_or_used_challenge");
   const duplicate = await mf.dispatchFetch(`https://ec1.local/api/auth/browser/google/callback?state=${challenge.state}&code=other`,{redirect:"manual",headers:{"User-Agent":"Mozilla/5.0 (Linux; Android 15)"}});
@@ -1349,6 +1400,7 @@ test("Apple browser uses form_post, server ES256 secret and exact Services audie
     const authorize=new URL(challenge.authorizeUrl);
     if(provider==="apple") {
       assert.equal(authorize.searchParams.get("response_mode"),"form_post");
+      assert.equal(authorize.searchParams.get("scope"),"email");
       editorIdToken=await token({iss:"https://appleid.apple.com",aud:"browser-apple",sub:"synthetic-browser-apple",nonce:challenge.nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300});
       assert.equal((await mf.dispatchFetch(`https://ec1.local/api/auth/browser/apple/callback?state=${challenge.state}&code=x`)).status,400);
     }
@@ -1359,7 +1411,12 @@ test("Apple browser uses form_post, server ES256 secret and exact Services audie
     assert.ok(ticket);
     const result=await request(`/api/auth/provider/${provider}`,{intent:"signin",challengeId:challenge.state,state:challenge.state,ticket,codeVerifier:verifier});
     assert.equal(result.error,provider==="apple" ? "identity_not_registered" : undefined);
-    if(provider==="discord") assert.equal(result.status,200);
+    if(provider==="discord") {
+      assert.equal(authorize.searchParams.get("scope"),"identify email");
+      assert.equal(result.status,200);
+      const identities=(await request("/api/auth/identities",null,result.accessToken,"GET")).identities;
+      assert.equal(identities.find(i=>i.provider==="discord").email,"discord@fixture.invalid");
+    }
   }
   browserDiscord=false;
 });
@@ -1394,6 +1451,60 @@ test("desktop cancellation completion stays in browser and preserves game pollin
   assert.equal(poll.error,"access_denied");assert.equal(poll.ticket,undefined);
 });
 
+test("Apple relay email is captured from signed browser proof and survives a later proof without email", async () => {
+  const verifier="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq";
+  const codeChallenge=b64(new Uint8Array(await webcrypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier))));
+  let player;
+  for (const intent of ["create","signin"]) {
+    const challenge=await request("/api/auth/provider/apple/challenge",{intent,transport:"browser",codeChallenge});
+    editorIdToken=await token({iss:"https://appleid.apple.com",aud:"browser-apple",sub:"apple-display-subject",nonce:challenge.nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300,...(intent==="create" ? {email:"relay@privaterelay.appleid.com",email_verified:"true"} : {})});
+    const callback=await mf.dispatchFetch("https://ec1.local/api/auth/browser/apple/callback",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","User-Agent":"iPhone"},body:new URLSearchParams({state:challenge.state,code:"synthetic"}),redirect:"manual"});
+    const target=new URL(callback.headers.get("location"));
+    assert.equal(target.searchParams.has("email"),false);
+    const result=await request("/api/auth/provider/apple",{intent,challengeId:challenge.state,state:challenge.state,ticket:target.searchParams.get("ticket"),codeVerifier:verifier,...boot("apple-email-display")});
+    assert.equal(result.status,200);
+    if(player) assert.equal(result.playerId,player);
+    player=result.playerId;
+    const rows=(await request("/api/auth/identities",null,result.accessToken,"GET")).identities;
+    assert.equal(rows[0].email,"relay@privaterelay.appleid.com");
+    assert.equal(JSON.stringify(rows).includes("apple-display-subject"),false);
+  }
+});
+
+test("identity display emails use verified claims, backfill on sign-in and stay private to their owner", async () => {
+  const complete = async (intent, extra, access) => {
+    const challenge=await request("/api/auth/provider/google/challenge",{intent},access);
+    const idToken=await token({iss:"https://accounts.google.com",aud:"ec1-google-fixture",sub:"opaque-subject@not-an-email.invalid",nonce:challenge.nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300,...extra});
+    const body={intent,challengeId:challenge.challengeId,idToken,email:"client-asserted@fixture.invalid",...boot("email-metadata")};
+    return {result:await request("/api/auth/provider/google",body,access),body};
+  };
+  const read=async access=>(await request("/api/auth/identities",null,access,"GET")).identities;
+  const {result:created}=await complete("create",{email:"unverified@fixture.invalid",email_verified:false});
+  assert.equal(created.status,200);
+  assert.deepEqual((await read(created.accessToken)).map(i=>i.email),[null]);
+  const signed=await complete("signin",{email:"Verified@fixture.invalid",email_verified:true});
+  assert.equal(signed.result.status,200);
+  let rows=await read(signed.result.accessToken);
+  assert.equal(rows[0].email,"verified@fixture.invalid");
+  assert.deepEqual(Object.keys(rows[0]).sort(),["created_at","email","provider"]);
+  await db.prepare("UPDATE auth_identity SET display_email=NULL WHERE player_id=?").bind(created.playerId).run();
+  const replay=await request("/api/auth/provider/google",signed.body);
+  assert.equal(replay.status,200);
+  assert.equal((await read(replay.accessToken))[0].email,"verified@fixture.invalid");
+  const missing=await complete("signin",{});
+  assert.equal((await read(missing.result.accessToken))[0].email,"verified@fixture.invalid");
+  const invalid=await complete("signin",{email:"bad\naddress@fixture.invalid",email_verified:true});
+  assert.equal((await read(invalid.result.accessToken))[0].email,"verified@fixture.invalid");
+  const other=await request("/api/auth/register",{...boot("display-email-other"),email:"Other@fixture.invalid",password:"synthetic-password"});
+  rows=await read(other.accessToken);
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].email,"other@fixture.invalid");
+  assert.equal((await request("/api/auth/identities",null,null,"GET")).status,401);
+  const conflict=await complete("link",{email:"changed@fixture.invalid",email_verified:true},other.accessToken);
+  assert.equal(conflict.result.error,"identity_already_claimed");
+  assert.equal((await read(created.accessToken))[0].email,"verified@fixture.invalid");
+});
+
 test("database outages do not masquerade as missing credentials or call PlayFab", async () => {
   const outbound = requests.length;
   await db.prepare("DROP TABLE auth_identity").run();
@@ -1406,6 +1517,12 @@ test("database outages do not masquerade as missing credentials or call PlayFab"
   const create = await request("/api/auth/guest", boot("database-outage"));
   assert.equal(create.status, 503);
   assert.equal(create.error, "auth_unavailable");
+  await db.prepare("ALTER TABLE auth_device_credential RENAME TO unavailable_device_credential").run();
+  for(const route of ["/api/auth/device/login","/api/auth/device/forget"]) {
+    const response=await request(route,device("device-database-outage"));
+    assert.equal(response.status,503);
+    assert.equal(response.error,"auth_unavailable");
+  }
   assert.equal(requests.length, outbound);
   assert.equal(
     (

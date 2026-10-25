@@ -26,8 +26,8 @@ async function brokerVerifier(env: Env, state: string) { return mac(env.PLAYER_T
 export async function browserAuthorize(env: Env, provider: string, state: string, nonce: string) {
   const config = browserConfig(env, provider);
   const params = new URLSearchParams({ client_id: config.clientId, redirect_uri: config.redirect, response_type: "code", scope: "openid email", state, nonce });
-  if (provider !== "apple") { if (provider === "discord") params.set("scope","identify"); params.set("code_challenge", await hash(await brokerVerifier(env, state))); params.set("code_challenge_method", "S256"); if (provider === "google") params.set("prompt", "select_account"); }
-  else { params.delete("scope"); params.set("response_mode", "form_post"); }
+  if (provider !== "apple") { if (provider === "discord") params.set("scope","identify email"); params.set("code_challenge", await hash(await brokerVerifier(env, state))); params.set("code_challenge_method", "S256"); if (provider === "google") params.set("prompt", "select_account"); }
+  else { params.set("scope", "email"); params.set("response_mode", "form_post"); }
   return `${provider === "google" ? "https://accounts.google.com/o/oauth2/v2/auth" : provider === "discord" ? "https://discord.com/oauth2/authorize" : "https://appleid.apple.com/auth/authorize"}?${params}`;
 }
 async function appleSecret(env: Env, clientId: string) {
@@ -68,9 +68,10 @@ export function createBrowserAuth() {
     try {
     const code = params.get("code"); if (!code || code.length>4096) throw new AuthError("invalid_browser_callback",400);
     if (provider === "discord") {
-      const subject = await providerProof(c.env,provider,{code,codeVerifier:await brokerVerifier(c.env,state),redirectUri:config.redirect},row.nonce);
+      const proof = await providerProof(c.env,provider,{code,codeVerifier:await brokerVerifier(c.env,state),redirectUri:config.redirect},row.nonce);
+      const subject = proof.subject;
       const ticket = await mac(c.env.PLAYER_TOKEN_SECRET,`ec1/browser-ticket/v1/${state}/${subject}`);
-      await c.env.DB.prepare("UPDATE auth_challenge SET browser_subject=?,browser_ticket_hash=? WHERE id=? AND expires_at>? AND used_at IS NULL").bind(subject,await hash(ticket),state,now()).run();
+      await c.env.DB.prepare("UPDATE auth_challenge SET browser_subject=?,browser_ticket_hash=?,verified_email=? WHERE id=? AND expires_at>? AND used_at IS NULL").bind(subject,await hash(ticket),proof.email,state,now()).run();
       target.searchParams.set("ticket",ticket); return browserCompletionResponse(target.toString(),c.req.header("User-Agent"));
     }
     const form = new URLSearchParams({client_id:config.clientId,client_secret:provider === "google" ? c.env.GOOGLE_BROWSER_CLIENT_SECRET! : await appleSecret(c.env,config.clientId),grant_type:"authorization_code",code,redirect_uri:config.redirect});
@@ -80,11 +81,12 @@ export function createBrowserAuth() {
     if (!response.ok) throw new AuthError(response.status>=500 || response.status===429 ? "provider_unavailable" : "invalid_provider_proof",response.status>=500 || response.status===429 ? 503 : 401);
     let token: {id_token?:string;access_token?:string}; try { token = await response.json(); } catch { throw new AuthError("provider_unavailable",503); }
     // Exact browser audience, independently of native app audience configuration.
-    const subject = await providerProof({...c.env, GOOGLE_CLIENT_IDS:provider === "google" ? config.clientId : c.env.GOOGLE_CLIENT_IDS,APPLE_CLIENT_IDS:provider === "apple" ? config.clientId : c.env.APPLE_CLIENT_IDS},provider,{idToken:token.id_token},row.nonce);
+    const proof = await providerProof({...c.env, GOOGLE_CLIENT_IDS:provider === "google" ? config.clientId : c.env.GOOGLE_CLIENT_IDS,APPLE_CLIENT_IDS:provider === "apple" ? config.clientId : c.env.APPLE_CLIENT_IDS},provider,{idToken:token.id_token},row.nonce);
+    const subject = proof.subject;
     if (provider === "google" && c.env.LEGACY_MIGRATION_ENABLED === "true")
       await prepareBrowserClassicProof(c.env, state, subject, token.access_token);
     const ticket = await mac(c.env.PLAYER_TOKEN_SECRET,`ec1/browser-ticket/v1/${state}/${subject}`);
-    await c.env.DB.prepare("UPDATE auth_challenge SET browser_subject=?,browser_ticket_hash=? WHERE id=? AND expires_at>? AND used_at IS NULL").bind(subject,await hash(ticket),state,now()).run();
+    await c.env.DB.prepare("UPDATE auth_challenge SET browser_subject=?,browser_ticket_hash=?,verified_email=? WHERE id=? AND expires_at>? AND used_at IS NULL").bind(subject,await hash(ticket),proof.email,state,now()).run();
     target.searchParams.set("ticket",ticket); return browserCompletionResponse(target.toString(),c.req.header("User-Agent"));
     } catch (error) {
       const reason = error instanceof AuthError ? error.code : "provider_unavailable";
