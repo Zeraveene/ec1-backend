@@ -9,6 +9,12 @@ import { createRecoveryApp } from "./recovery";
 import { createPurchasesApp } from "./purchases";
 import { createClassicAdminControl } from "./admin/control";
 
+import { createGrantsApp } from './liveops/grants';
+import { createCouponApp } from './liveops/coupons';
+import { createMailApp } from './liveops/mail';
+import { createNewsApp } from './liveops/news';
+import { createLeaderboardsApp } from './liveops/leaderboards';
+
 const app = new Hono<AppEnv>();
 app.use("*", secureHeaders());
 app.use(
@@ -32,6 +38,11 @@ app.get("/api/health", (c) =>
 app.route("/api/auth", createAuthApp());
 app.route("/api/recovery", createRecoveryApp());
 app.route("/api/purchases", createPurchasesApp());
+app.route('/api/liveops/grants', createGrantsApp());
+app.route('/api/liveops/coupons', createCouponApp());
+app.route('/api/liveops/mail', createMailApp());
+app.route('/api/liveops/news', createNewsApp());
+app.route('/api/liveops/leaderboards', createLeaderboardsApp());
 app.route("/api/game", createGameApp());
 app.route("/auth", createAdminAuthApp());
 app.route("/api/admin", createAdminApp());
@@ -69,6 +80,7 @@ export default {
     await cleanupAuthState(env);
     await cleanupAdminState(env);
     await env.DB.batch([
+      env.DB.prepare("DELETE FROM liveops_rate_limit WHERE bucket IN (SELECT bucket FROM liveops_rate_limit WHERE expires_at<? LIMIT 100)").bind(Date.now()),
       env.DB.prepare(
         "DELETE FROM recovery_rate WHERE bucket IN (SELECT bucket FROM recovery_rate WHERE expires_at<? LIMIT 100)",
       ).bind(Math.floor(Date.now() / 1000)),

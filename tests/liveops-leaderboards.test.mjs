@@ -1,0 +1,56 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
+import {readFile,readdir} from 'node:fs/promises';
+test('Classic explicit fortress submissions, deterministic ranking, bans, lifecycle and concurrency',async()=>{
+ const built=await build({stdin:{resolveDir:process.cwd(),contents:`import {Hono} from 'hono';import {createLeaderboardsApp,dispatchLeaderboardAdmin} from './src/liveops/leaderboards';import {signToken} from './src/auth/crypto';const app=new Hono();app.route('/api/liveops/leaderboards',createLeaderboardsApp());app.get('/test/token/:id',async c=>c.json({token:await signToken(c.env.PLAYER_TOKEN_SECRET,{sub:c.req.param('id'),sid:'session-'+c.req.param('id'),scope:'player',provider:'email'})}));app.post('/test/admin',async c=>{const b=await c.req.json();const r=await dispatchLeaderboardAdmin(c.env,{id:'synthetic-admin',name:'Test'},b.role??'internal',b.operation,b.args??{});return c.json(r.body,r.status)});export default app;`},bundle:true,format:'esm',platform:'browser',write:false});
+ let calls=0;
+ const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:built.outputFiles[0].text,compatibilityDate:'2026-10-06',d1Databases:{DB:'leaderboards-test'},bindings:{PLAYER_TOKEN_SECRET:'synthetic-leaderboard-secret-32-characters'},outboundService:()=>{calls++;throw Error('network forbidden')}}));
+ try{
+  const db=await mf.getD1Database('DB');
+  for(const file of (await readdir('migrations')).filter(f=>f.endsWith('.sql')).sort())await db.exec((await readFile('migrations/'+file,'utf8')).replace(/--[^\n]*/g,'').replace(/\n/g,' '));
+  const tokens={};
+  for(const id of ['a','b','c']){await db.prepare('INSERT INTO player(id,display_name,created_at,updated_at) VALUES (?,?,1,1)').bind(id,id==='a'?'<A>\nName':id).run();await db.prepare("INSERT INTO auth_session(id,player_id,provider,scope,created_at,expires_at) VALUES (?,?,'email','player',1,4102444800)").bind('session-'+id,id).run();tokens[id]=(await (await mf.dispatchFetch('https://local.test/test/token/'+id)).json()).token;}
+  const request=async(path,body,player)=>{const r=await mf.dispatchFetch('https://local.test'+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(player?{Authorization:'Bearer '+tokens[player]}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:r.status,body:await r.json()};};
+  const admin=(operation,args={},role='internal')=>request('/test/admin',{operation:'leaderboards.'+operation,args,role});
+  const base='/api/liveops/leaderboards';const submit=(player,operationId,record,season=1,version=2)=>request(base+'/infinity_fortress/submit',{season,version,operationId,record},player);
+  assert.equal((await request(base+'/boards')).body.boards[0].submissionPaused,true);assert.equal((await admin('status',{},'unknown')).status,403);assert.equal((await admin('pause',{expectedVersion:1,paused:false,operationId:'unknown-role'},'unknown')).status,403);
+  const record={character:0,floor:8,cleartime:100};
+  assert.equal((await submit('a','paused',record,1,1)).status,409);
+  assert.equal((await admin('pause',{expectedVersion:1,paused:false,operationId:'resume'},'guest')).status,403);
+  const resume={expectedVersion:1,paused:false,operationId:'resume'};
+  assert.equal((await admin('pause',resume)).body.version,2);assert.equal((await admin('pause',resume)).body.version,2);
+  assert.equal((await admin('pause',{...resume,paused:true})).body.error,'operation_conflict');
+  assert.equal((await request(base+'/infinity_fortress/submit',{season:1,version:2,operationId:'bad',record})).status,401);
+  assert.equal((await submit('a','first',record)).status,200);assert.equal((await submit('b','first',record)).status,200);
+  let top=await request(base+'/infinity_fortress/top?limit=1');assert.equal(top.body.entries[0].playerId,'a');assert.equal(top.body.entries[0].playerName,'AName');assert.equal(top.body.nextOffset,1);assert.deepEqual((await admin('top',{season:1,limit:1},'guest')).body.entries,top.body.entries);assert.deepEqual(Object.keys(top.body.entries[0]).sort(),['playerId','playerName','rank','record','score']);
+  assert.equal((await request(base+'/infinity_fortress/top?offset=1&limit=1')).body.entries[0].rank,2);
+  assert.equal((await request(base+'/infinity_fortress/around-me',undefined,'b')).body.rank,2);
+  assert.equal((await request(base+'/infinity_fortress/players/a')).body.entry.score,7999000);
+  assert.equal((await submit('a','first',record)).status,200);assert.equal((await submit('a','first',{...record,floor:9})).body.error,'operation_conflict');
+  for(const bad of [{...record,floor:2148},{...record,character:4},{...record,cleartime:-1},{...record,floor:1.5},{...record,score:1}])assert.equal((await submit('c','bad',bad)).status,400);
+  assert.equal((await request(base+'/infinity_fortress/submit',{season:1,version:2,operationId:'arbitrary',record,score:90000000},'a')).status,400);
+  assert.equal((await request(base+'/infinity_fortress/submit',{padding:'x'.repeat(5000)},'a')).status,413);
+  const race=await Promise.all([submit('c','race',{...record,floor:9}),submit('c','race',{...record,floor:10})]);assert.deepEqual(race.map(x=>x.status).sort(),[200,409]);
+  await Promise.all([submit('a','low',{...record,floor:7}),submit('a','high',{...record,floor:12})]);assert.equal((await request(base+'/infinity_fortress/players/a')).body.entry.record.floor,12);
+  await db.prepare("INSERT INTO player_ban(player_id,reason,created_at) VALUES ('a','synthetic',1)").run();
+  assert.equal((await request(base+'/infinity_fortress/players/a')).body.entry,null);assert.equal((await submit('a','banned',record)).status,403);assert.equal((await request(base+'/infinity_fortress/top')).body.entries.some(x=>x.playerId==='a'),false);
+  const resetArgs={expectedVersion:2,operationId:'reset'};const resets=await Promise.all([admin('reset',resetArgs),admin('reset',resetArgs)]);assert.ok(resets.every(x=>x.status===200));assert.ok(resets.every(x=>x.body.season===2));
+  assert.equal((await request(base+'/infinity_fortress/top')).body.entries.length,0);assert.equal((await request(base+'/infinity_fortress/top?season=1')).body.entries.length,2);
+  assert.equal((await submit('b','first',record)).status,200);assert.equal((await submit('b','old',record)).status,409);assert.equal((await admin('pause',{expectedVersion:2,operationId:'stale',paused:false})).status,409);
+  assert.equal((await admin('pause',{expectedVersion:3,operationId:'resume2',paused:false})).body.version,4);
+  assert.equal((await submit('b','new',record,2,4)).status,200);
+  const changes=await Promise.all([admin('pause',{expectedVersion:4,operationId:'pause-race',paused:true}),admin('reset',{expectedVersion:4,operationId:'reset-race'})]);assert.deepEqual(changes.map(x=>x.status).sort(),[200,409]);
+  const history=(await admin('history')).body.history;assert.equal(history.length,4);assert.equal((await db.prepare('SELECT COUNT(*) n FROM admin_audit WHERE action LIKE ?').bind('leaderboards.%').first()).n,4);
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM save_revision').first()).n,0);
+  await db.prepare("INSERT INTO liveops_rate_limit(bucket,count,expires_at) VALUES ('leaderboard:b',30,?) ON CONFLICT(bucket) DO UPDATE SET count=30,expires_at=excluded.expires_at").bind(Date.now()+60000).run();
+  assert.equal((await submit('b','new',record,2,4)).status,200);
+  const limited=await submit('b','limited',record,2,4);assert.equal(limited.status,429);assert.ok(limited.body.retryAfterSeconds>0);assert.equal((await db.prepare("SELECT COUNT(*) n FROM liveops_rate_limit WHERE bucket LIKE 'leaderboard:%'").first()).n,3);
+  const current=(await admin('status')).body;const opened=(await admin('pause',{expectedVersion:current.version,operationId:'limit-resume',paused:false})).body;
+  await db.prepare("UPDATE liveops_rate_limit SET expires_at=0 WHERE bucket='leaderboard:b'").run();
+  assert.equal((await submit('b','after-window',record,opened.season,opened.version)).status,200);assert.equal((await db.prepare("SELECT count FROM liveops_rate_limit WHERE bucket='leaderboard:b'").first()).count,1);
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM admin_audit WHERE action LIKE ? AND created_at<1000000000000').bind('leaderboards.%').first()).n,0);
+  assert.equal(calls,0);
+ }finally{await mf.dispose();}
+});

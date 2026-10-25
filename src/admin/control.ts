@@ -9,6 +9,10 @@ import { auditLegacyRead } from './legacy-playfab';
 import { readWorkspace, type Operation } from "./workspace-read";
 import { revisionList, revisionGet, revisionPreviewRestore, revisionRestore } from "./revisions";
 
+import { dispatchPurchaseAdmin } from "../purchases/admin";
+import { purchaseAdminCatalog } from "../purchases/catalog";
+import { dispatchLiveopsAdmin, rewardCatalog } from "../liveops/admin";
+
 type ControlEnv = { Bindings: Env; Variables: { adminActor: AdminActor } };
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -61,7 +65,10 @@ export function createClassicAdminControl() {
     } catch { return c.json({ error: "admin_authority_unavailable" }, 503); }
     await next();
   });
-  app.use("*", bodyLimit({ maxSize: 32768, onError: c => c.json({ error: "request_too_large" }, 413) }));
+  app.use("*", (c, next) => bodyLimit({
+    maxSize: c.req.path.startsWith('/api/classic-admin/liveops/') ? 256 * 1024 : 32768,
+    onError: c => c.json({ error: 'request_too_large' }, 413),
+  })(c, next));
   app.onError((error, c) => {
     const typed = error as { code?: unknown; status?: unknown };
     if (typeof typed.code === "string" && /^[a-z][a-z0-9_]{1,80}$/.test(typed.code) &&
@@ -90,8 +97,41 @@ export function createClassicAdminControl() {
   app.get("/players", c => read(c, "players", { query: c.req.query("query"), cursor: c.req.query("cursor") }));
   app.get("/players/:id", c => read(c, "player", { id: c.req.param("id") }));
   app.get("/audit", c => read(c, "audit", { cursor: c.req.query("cursor") }));
+  app.get('/purchases/catalog', c => {
+    requireWriter(c.get('adminActor'));
+    return c.json(purchaseAdminCatalog());
+  });
+  app.get('/purchases', async c => {
+    const actor = c.get('adminActor');
+    const result = await dispatchPurchaseAdmin(c.env, actor, actor.role, 'purchases.analytics', c.req.query());
+    return c.json(result.body, result.status as ContentfulStatusCode);
+  });
+  app.get('/purchases/:id', async c => {
+    const actor = c.get('adminActor');
+    const result = await dispatchPurchaseAdmin(c.env, actor, actor.role, 'purchases.detail', {id:c.req.param('id')});
+    return c.json(result.body, result.status as ContentfulStatusCode);
+  });
+  app.get('/liveops/catalog', c => c.json(rewardCatalog()));
+  app.get('/liveops/:feature/:action', async c => {
+    let args: unknown;
+    const raw = c.req.query('args') ?? '{}';
+    if (raw.length > 8192) throw new AdminActionError('invalid_arguments');
+    try { args = JSON.parse(raw); } catch { throw new AdminActionError('invalid_arguments'); }
+    if (!object(args)) throw new AdminActionError('invalid_arguments');
+    const actor = c.get('adminActor');
+    const result = await dispatchLiveopsAdmin(c.env, actor, actor.role, c.req.param('feature'), c.req.param('action'), args, false);
+    return c.json(result.body, result.status as ContentfulStatusCode);
+  });
+  app.post('/liveops/:feature/:action', async c => {
+    let args: unknown;
+    try { args = await c.req.json(); } catch { throw new AdminActionError('invalid_arguments'); }
+    if (!object(args)) throw new AdminActionError('invalid_arguments');
+    const actor = c.get('adminActor');
+    const result = await dispatchLiveopsAdmin(c.env, actor, actor.role, c.req.param('feature'), c.req.param('action'), args, true);
+    return c.json(result.body, result.status as ContentfulStatusCode);
+  });
   app.get("/capabilities", c => c.json({ game: "ec1", role: c.get("adminActor").role,
-    canWrite: c.get("adminActor").role === "internal", features: { identities: true, revisions: true, canonicalRevisions: true } }));
+    canWrite: c.get("adminActor").role === "internal", canManageLiveOps: c.get("adminActor").role !== "guest", features: { identities: true, revisions: true, canonicalRevisions: true, liveops: true } }));
   app.get("/players/:id/identities", async c => c.json(await identityRead(c.env, c.get("adminActor"), { id: c.req.param("id") })));
   app.post("/players/:id/identities/:provider/move/preview", async c => {
     const b = await body(c);

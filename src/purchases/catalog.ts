@@ -1,4 +1,4 @@
-import type { Reward } from "../game/rewards";
+import { itemCatalog, type Reward } from "../game/rewards";
 import { PurchaseError } from "./store";
 export interface ProductGrant {
   rewards: Reward[];
@@ -185,4 +185,30 @@ export function productGrant(
   const product = Object.hasOwn(logical, key) ? logical[key] : undefined;
   if (!product) throw new PurchaseError("purchase_product_unsupported", 422);
   return structuredClone(product);
+}
+
+/** Safe admin metadata; prices and sale status always come from store verification. */
+export function purchaseAdminCatalog() {
+  const names: Record<string, string> = {
+    premium: 'Premium', archer: 'Unlock Louisa', souru: 'Unlock Soul',
+    double_loot: 'Double Loot', more_exp: 'More EXP', starter: 'Starter Pack',
+    booster_pack: 'Dual Booster', xmas_pack: 'Christmas Costume Pack',
+    brave_pack: 'Brave Costume Pack', lny_pack: 'Lunar New Year Costume Pack',
+    date_pack_b: 'Date Costume Pack', elysian_pack: 'Elysian Costume Pack',
+    jewel_red: 'Red Jewel Pack', jewel_orange: 'Orange Jewel Pack', jewel_purple: 'Purple Jewel Pack',
+  };
+  const title = (id: string, grant: ProductGrant) => names[id] ??
+    (/^ruby[1-8]$/.test(id) ? `${grant.rewards[0].amount.toLocaleString('en-US')} Ruby` :
+    /^stepup_[1-5]$/.test(id) ? `Step Up #${id.slice(-1)}` :
+    id.split('_').map(word => word[0].toUpperCase() + word.slice(1)).join(' '));
+  const products: Array<{platform:'google'|'apple';productId:string;name:string;rewards:Reward[];entitlements:string[];iconId:string|null}> = [];
+  for (const platform of ['google','apple'] as const) {
+    const ids = platform === 'google' ? Object.keys(logical) : [...Object.keys(iosAliases),...Object.keys(logical).filter(id=>/^(ruby[1-8]|jewel_(red|orange|purple))$/.test(id))];
+    for (const productId of ids.sort()) {
+      const grant = productGrant(platform, productId);
+      const logicalId = platform === 'apple' ? iosAliases[productId] ?? productId : productId;
+      products.push({platform,productId,name:title(logicalId,grant),rewards:grant.rewards.map(reward=>({...reward,name:reward.id==='gold'?'Gold':reward.id==='ruby'?'Ruby':itemCatalog[reward.id]?.item.m_name??reward.id})),entitlements:Object.keys(grant.entitlements),iconId:grant.rewards.find(reward=>reward.id==='ruby')?.id??grant.rewards[0]?.id??null});
+    }
+  }
+  return {game:'ec1',products};
 }
