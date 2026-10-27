@@ -20,10 +20,10 @@ test('existing Google audience matches the public local example', () => {
   assert.equal(exampleValue('GOOGLE_CLIENT_IDS'), productionValue('GOOGLE_CLIENT_IDS'));
 });
 
-test('legacy cutover enables only migration and manual backups in production', () => {
-  for (const name of ['LEGACY_MIGRATION_ENABLED', 'EC1_MANUAL_BACKUPS_ENABLED'])
+test('production enables migration, manual backups and verified purchases', () => {
+  for (const name of ['LEGACY_MIGRATION_ENABLED', 'EC1_MANUAL_BACKUPS_ENABLED', 'IAP_PURCHASES_ENABLED'])
     assert.equal(productionValue(name), 'true', name);
-  for (const name of ['ALLOW_NEW_ACCOUNTS', 'RECOVERY_ENABLED', 'IAP_PURCHASES_ENABLED', 'IAP_ALLOW_TEST_PURCHASES'])
+  for (const name of ['ALLOW_NEW_ACCOUNTS', 'RECOVERY_ENABLED', 'IAP_ALLOW_TEST_PURCHASES'])
     assert.equal(productionValue(name), 'false', name);
   assert.doesNotMatch(productionSection, /^APPLE_(?:PRIVATE_KEY|CLIENT_SECRET|KEY_ID)\s*=/m);
 });

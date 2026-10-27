@@ -4,6 +4,8 @@ Independent EC1 Cloudflare Worker, D1 player database, immutable R2 save history
 
 ## Working locally
 
+The account-independent `GET /api/public/time` endpoint supplies UTC time for reward timers. See the [public clock contract](docs/public-clock.md).
+
 Use Node 24. `npm ci`, copy `.env.example` to the ignored `.dev.vars`, and generate two separate random signing secrets. `npm run check` runs strict TypeScript, intercepted/synthetic API integration tests and the dashboard production build. `npm audit` currently reports zero known vulnerabilities across runtime and development dependencies.
 
 Run `npx wrangler d1 migrations apply epicon1-player-data-staging --env staging --local`, then `npx wrangler dev --env staging --local --ip 127.0.0.1 --port 8791`. Local email sending and legacy migration stay disabled. Never enable remote email bindings for synthetic tests.

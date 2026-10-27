@@ -6,7 +6,7 @@ import {
   validateSnapshot,
   type Snapshot,
 } from "./validation";
-import { fortressScore } from "./leaderboard";
+import { fortressRecord } from "./leaderboard";
 import { applyRewardFlags } from "./rewards";
 export interface SaveResult {
   playerId: string;
@@ -182,7 +182,7 @@ export async function publishSnapshot(
     };
   }
   const { healthy } = validateSnapshot(snapshot, options.legacy),
-    score = fortressScore(snapshot.data);
+    record = fortressRecord(snapshot.data);
   const player = await env.DB.prepare(
     "SELECT save_version,playtime,save_state FROM player WHERE id=?",
   )
@@ -405,9 +405,11 @@ export async function publishSnapshot(
   }
   statements.push(
     env.DB.prepare(
-      "INSERT INTO player_leaderboard(player_id,score,save_version,updated_at) SELECT player_id,?,version,? FROM save_revision WHERE player_id=? AND version=? AND operation_id=? AND payload_hash=? ON CONFLICT(player_id) DO UPDATE SET score=excluded.score,save_version=excluded.save_version,updated_at=excluded.updated_at WHERE excluded.score>player_leaderboard.score OR ?=1",
+      "INSERT INTO player_leaderboard(player_id,character,floor,cleartime,save_version,updated_at) SELECT player_id,?,?,?,version,? FROM save_revision WHERE player_id=? AND version=? AND operation_id=? AND payload_hash=? ON CONFLICT(player_id) DO UPDATE SET character=excluded.character,floor=excluded.floor,cleartime=excluded.cleartime,save_version=excluded.save_version,updated_at=excluded.updated_at WHERE excluded.floor>player_leaderboard.floor OR (excluded.floor=player_leaderboard.floor AND (excluded.cleartime<player_leaderboard.cleartime OR (excluded.cleartime=player_leaderboard.cleartime AND excluded.character>player_leaderboard.character))) OR ?=1",
     ).bind(
-      score,
+      record.character,
+      record.floor,
+      record.cleartime,
       now,
       playerId,
       version,

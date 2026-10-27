@@ -14,7 +14,7 @@ before(async () => {
     { name: 'caller', modules: true, compatibilityDate: '2026-10-06', serviceBindings: { WORKSPACE: { name: 'workspace', entrypoint: 'AdminWorkspace' }, MISSING: { name: 'missing', entrypoint: 'AdminWorkspace' } }, script: `export default {async fetch(request,env){const b=await request.json(); return Response.json(await (b.missing?env.MISSING:env.WORKSPACE).read(b.actor,b.operation,b.args));}};` },
   ] }));
   db = await mf.getD1Database('DB', 'workspace');
-  for (const file of ['001_auth.sql','002_game.sql','003_admin.sql']) for (const sql of (await readFile(`migrations/${file}`, 'utf8')).split(';').map(x=>x.trim()).filter(Boolean)) await db.prepare(sql).run();
+  for (const file of ['001_auth.sql','002_game.sql','030_liveops_leaderboards.sql','033_structured_fortress.sql','003_admin.sql']) for (const sql of (await readFile(`migrations/${file}`, 'utf8')).split(';').map(x=>x.trim()).filter(Boolean)) await db.prepare(sql).run();
   await db.prepare('CREATE TABLE authority (id TEXT PRIMARY KEY,role TEXT)').run();
   await db.prepare('INSERT INTO authority VALUES (?,?)').bind(actor.id,'internal').run();
   for(let i=0;i<103;i++) await db.prepare('INSERT INTO player(id,display_name,created_at,updated_at,device_id) VALUES (?,?,10,20,?)').bind(`fixture${String(i).padStart(3,'0')}`,'勇者 Fixture','secret-device').run();

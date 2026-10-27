@@ -1,11 +1,12 @@
 import type { Env } from '../env';
+import { configuredProducts } from './grants';
 
 // Only fields written by verifyStore are used. It does not persist financial facts.
 const time = `CASE WHEN p.verification_source IN ('google_api','apple_signed_receipt') AND json_valid(p.facts_json) THEN CASE WHEN json_type(p.facts_json,'$.purchaseTime') IN ('integer','real') AND json_extract(p.facts_json,'$.purchaseTime')>=0 AND json_extract(p.facts_json,'$.purchaseTime')<=p.created_at+60000 THEN CAST(json_extract(p.facts_json,'$.purchaseTime') AS INTEGER) ELSE p.created_at END ELSE p.created_at END`;
 // Google stores a token hash in transaction_id; only a format-validated store order is displayable.
 const googleOrder = `CASE WHEN p.platform='google' AND p.verification_source='google_api' AND json_valid(p.facts_json) THEN CASE WHEN json_type(p.facts_json,'$.orderId')='text' AND length(json_extract(p.facts_json,'$.orderId'))=24 AND json_extract(p.facts_json,'$.orderId') GLOB 'GPA.????-????-????-?????' AND substr(json_extract(p.facts_json,'$.orderId'),5) NOT GLOB '*[^0-9-]*' AND length(replace(json_extract(p.facts_json,'$.orderId'),'-',''))=21 THEN json_extract(p.facts_json,'$.orderId') ELSE NULL END ELSE NULL END`;
 const projection = `p.rowid AS rowId,p.platform,CASE WHEN p.platform='apple' THEN p.transaction_id ELSE ${googleOrder} END AS transactionId,p.player_id AS playerId,pl.display_name AS displayName,p.product_id AS productId,${time} AS purchasedAt,p.created_at AS validatedAt,p.granted_at AS grantedAt,p.status,p.environment,p.quantity,p.verification_source AS verificationSource,p.save_version AS saveVersion`;
-const baseReadiness = { ledger: true, financialAmounts: false, usdNormalization: false, refundReconciliation: false, country: false, reports: false, deliveryProtocolReady: false, refundChecksReady: false, reportsEnabled: false, reportingConfigured: false };
+const baseReadiness = { ledger: true, financialAmounts: false, usdNormalization: false, refundReconciliation: false, country: false, reports: false, deliveryProtocolReady: true, refundChecksReady: false, reportsEnabled: false, reportingConfigured: false };
 const from = 'FROM purchase_ledger p LEFT JOIN player pl ON pl.id=p.player_id';
 const dayMs = 86400000;
 function rowDto(row: Record<string, unknown>) {
@@ -18,7 +19,7 @@ function keys(args: Record<string, unknown>, allowed: string[]) { return Object.
 /** Read-only projection; caller must also authenticate and recheck current central role. */
 export async function dispatchPurchaseAdmin(env: Env, _actor: { id: string; name: string }, role: 'internal' | 'manager' | 'guest', operation: string, args: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
   if (role !== 'internal') return fail(403, 'forbidden');
-  const readiness = { ...baseReadiness, purchasesEnabled: env.IAP_PURCHASES_ENABLED === 'true' && env.EC1_MANUAL_BACKUPS_ENABLED !== 'true' };
+  const readiness = { ...baseReadiness, purchasesEnabled: configuredProducts(env).length > 0 };
   if (!args || typeof args !== 'object' || Array.isArray(args)) return fail(400, 'invalid_arguments');
   if (operation === 'purchases.detail') {
     if (!keys(args, ['id']) || typeof args.id !== 'string' || !/^p_[1-9a-z][0-9a-z]{0,10}$/.test(args.id)) return fail(400, 'invalid_arguments');
@@ -70,6 +71,6 @@ export async function dispatchPurchaseAdmin(env: Env, _actor: { id: string; name
       prepare(`SELECT CAST(strftime('%H',(${time})/1000,'unixepoch','+7 hours') AS INTEGER) AS hour,COUNT(*) AS purchases ${production} GROUP BY hour ORDER BY hour`),
     ]);
     const rows = recent.results as Record<string, unknown>[], more = rows.length > limit, visible = rows.slice(0, limit), last = visible.at(-1);
-    return { status: 200, body: { since, until, timeZone: 'Asia/Jakarta', totals: { ...totals.results[0], refundedPurchases: null }, revenue: [], products: products.results.map(row => ({ ...row, usdMicros: null })), daily: daily.results.map(row => ({ ...row, usdMicros: null, refunds: null })), recent: visible.map(rowDto), buyers: buyers.results.map(row => ({ ...row, usdMicros: null })), countries: [], hourly: days === 1 ? hourly.results.map(row => ({ ...row, usdMicros: null, refunds: null })) : [], previous: { ...previous.results[0], usdMicros: null }, environments: environments.results, nextCursor: more && last ? btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify([1, scope, until, last.purchasedAt, last.rowId])))) : null, limit, readiness, periodUsd: null, todayUsd: null, reportsEnabled: false, reportingConfigured: false, refundChecksReady: false, deliveryProtocolReady: false } };
+    return { status: 200, body: { since, until, timeZone: 'Asia/Jakarta', totals: { ...totals.results[0], refundedPurchases: null }, revenue: [], products: products.results.map(row => ({ ...row, usdMicros: null })), daily: daily.results.map(row => ({ ...row, usdMicros: null, refunds: null })), recent: visible.map(rowDto), buyers: buyers.results.map(row => ({ ...row, usdMicros: null })), countries: [], hourly: days === 1 ? hourly.results.map(row => ({ ...row, usdMicros: null, refunds: null })) : [], previous: { ...previous.results[0], usdMicros: null }, environments: environments.results, nextCursor: more && last ? btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify([1, scope, until, last.purchasedAt, last.rowId])))) : null, limit, readiness, periodUsd: null, todayUsd: null, reportsEnabled: false, reportingConfigured: false, refundChecksReady: false, deliveryProtocolReady: true } };
   } catch { return fail(503, 'purchase_storage_unavailable'); }
 }

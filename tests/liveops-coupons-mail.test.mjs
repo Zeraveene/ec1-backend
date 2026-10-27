@@ -85,7 +85,8 @@ before(async () => {
       script: bundle.outputFiles[0].text,
       compatibilityDate: "2026-10-06",
       d1Databases: { DB: "isolated-liveops" },
-      bindings: { PLAYER_TOKEN_SECRET: secret },
+      r2Buckets: { AUDIT_BLOBS: 'isolated-story-reports' },
+      bindings: { PLAYER_TOKEN_SECRET: secret, STORY_TEST_ENABLED: 'true', STORY_TEST_PLAYERS: 'owner', STORY_TEST_COUPON: 'SYNTHETIC-STORY-RUN' },
       outboundService: () => {
         throw Error("Outbound network forbidden");
       },
@@ -122,6 +123,44 @@ before(async () => {
   }
 });
 after(async () => await mf?.dispose());
+
+test('developer story coupon starts only for targeted player and never becomes a grant', async () => {
+  const check = await request('/coupons/check', { code: ' synthetic-story-run ' });
+  assert.equal(check.status, 200); assert.equal(check.body.diagnostic, 'full-story');
+  assert.equal(check.body.grant, undefined);
+  assert.equal((await request('/coupons/check', { code: 'SYNTHETIC-STORY-RUN' }, 'other')).status, 404);
+  assert.equal((await request('/coupons/story-test/start', { code: 'SYNTHETIC-STORY-RUN' }, 'other')).status, 404);
+  assert.equal((await request('/coupons/story-test/start', { code: 'SYNTHETIC-STORY-RUN' }, null)).status, 401);
+  const started = await request('/coupons/story-test/start', { code: 'SYNTHETIC-STORY-RUN' });
+  assert.equal(started.status, 200); assert.equal(started.body.playerId, 'owner');
+  const saved = await request('/coupons/story-test/report', { runId: started.body.runId, report: { passed: false, errors: ['x'.repeat(8000)] } });
+  assert.equal(saved.status, 200);
+  const bucket = await mf.getR2Bucket('AUDIT_BLOBS');
+  assert.ok(await bucket.get(`story-tests/owner/${started.body.runId}/result.json`));
+  const grants = await db.prepare("SELECT COUNT(*) n FROM liveops_grant WHERE player_id='owner'").first();
+  assert.equal(grants.n, 0);
+  const unauthorizedReport = await request('/coupons/story-test/report', { runId: started.body.runId, report: {} }, 'other');
+  assert.equal(unauthorizedReport.status, 404);
+});
+test("permanent unlock mail supports mixed rewards and immutable replay without a backup", async () => {
+  const ids = ['louisaUnlock', 'soulUnlock', 'premium', 'more_exp', 'double_loot', 'booster_pack',
+    ...['alaster', 'edna', 'louisa', 'soul'].flatMap(h => Array.from({ length: 8 }, (_, i) => `costume_${h}_${i + 1}`))];
+  const m = await mail({ rewards: [...ids.map(id => ({ id, amount: 1 })), { id: 'ruby', amount: 5 }] });
+  const claimed = await request(`/mail/${m.id}/claim`, {});
+  assert.equal(claimed.status, 200);
+  assert.deepEqual(claimed.body.grant.rewards.map(r => r.id), [...ids, 'ruby']);
+  assert.ok(claimed.body.grant.rewards.filter(r => ids.slice(0, 6).includes(r.id)).every(r => r.name && r.itemCategory === undefined));
+  assert.deepEqual((await request(`/mail/${m.id}/claim`, {})).body.grant, claimed.body.grant);
+  assert.equal((await request(`/grants/${claimed.body.grant.id}/ack`, {})).status, 200);
+  assert.equal((await db.prepare("SELECT save_version FROM player WHERE id='owner'").first()).save_version, 0);
+  for (const id of ids) {
+    const bad = await admin('mail.send', { playerId: 'owner', title: 'Invalid amount', rewards: [{ id, amount: 2 }] });
+    assert.equal(bad.body.error, 'invalid_rewards', id);
+  }
+  for (const id of ['dualTaken', 'stepUp1', 'setPref', '__proto__', 'costume_soul_9']) {
+    assert.equal((await admin('mail.send', { playerId: 'owner', title: 'Unsupported', rewards: [{ id, amount: 1 }] })).status, 422);
+  }
+});
 test("player auth, migration scope, no public coupon list or target list", async () => {
   assert.equal(
     (await request("/coupons/check", { code: "ANY" }, null)).status,

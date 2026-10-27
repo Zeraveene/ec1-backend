@@ -8,6 +8,7 @@ import { createAdminApp, createAdminAuthApp, cleanupAdminState } from "./admin";
 import { createRecoveryApp } from "./recovery";
 import { createPurchasesApp } from "./purchases";
 import { createClassicAdminControl } from "./admin/control";
+import { createTimeApp } from "./public/time";
 
 import { createGrantsApp } from './liveops/grants';
 import { createCouponApp } from './liveops/coupons';
@@ -35,6 +36,7 @@ app.get("/api/health", (c) =>
     recoveryEnabled: c.env.RECOVERY_ENABLED === "true",
   }),
 );
+app.route("/api/public", createTimeApp());
 app.route("/api/auth", createAuthApp());
 app.route("/api/recovery", createRecoveryApp());
 app.route("/api/purchases", createPurchasesApp());

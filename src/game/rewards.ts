@@ -1,5 +1,6 @@
 import { GameError, objectJson } from "./validation";
 import exportedCatalog from "./item-catalog.json";
+import { unlockReward } from "./unlock-rewards";
 interface CatalogItem {
   category: 1 | 2;
   item: {
@@ -49,6 +50,7 @@ export function validateRewards(value: unknown): Reward[] {
     if (
       r.id !== "gold" &&
       r.id !== "ruby" &&
+      !unlockReward(r.id) &&
       !/^costume_(alaster|edna|louisa|soul)_[1-8]$/.test(r.id) &&
       !item
     )
@@ -65,7 +67,7 @@ export function validateRewards(value: unknown): Reward[] {
       if (r.amount > item.item.stack)
         throw new GameError("reward_stack_overflow", 409, r.id);
     }
-    if (r.id.startsWith("costume_") && r.amount !== 1)
+    if ((r.id.startsWith("costume_") || unlockReward(r.id)) && r.amount !== 1)
       throw new GameError("invalid_rewards");
     return {
       id: r.id,
@@ -74,7 +76,7 @@ export function validateRewards(value: unknown): Reward[] {
         ? { name: r.name }
         : item
           ? { name: item.item.m_name }
-          : {}),
+          : unlockReward(r.id) ? { name: unlockReward(r.id)!.name } : {}),
       ...(item ? { itemCategory: item.category } : {}),
     };
   });
@@ -90,7 +92,9 @@ export function applyRewards(
     >;
   const gd = objectJson(prefs.gamedata, "gamedata");
   for (const reward of accepted) {
-    if (reward.id.startsWith("costume_")) prefs[reward.id] = "1";
+    const unlock = unlockReward(reward.id);
+    if (unlock) for (const flag of unlock.flags) prefs[flag] = "1";
+    else if (reward.id.startsWith("costume_")) prefs[reward.id] = "1";
     else if (reward.id === "gold" || reward.id === "ruby") {
       const next = Number(gd[reward.id]) + reward.amount;
       if (!Number.isSafeInteger(next) || next > 2_147_483_647)

@@ -15,6 +15,16 @@ async function admin(operation,args,role='manager'){return (await worker.fetch('
 const post=(id,extra={})=>({id,titles:{en:'Announcement',id:'Berita'},bodies:{en:'Plain text news'},publishAt:null,expireAt:null,pinned:false,draft:true,order:0,rewards:[{id:'gold',amount:10}],...extra});
 async function publicGet(path=''){const r=await worker.fetch('https://synthetic.test/api/liveops/news'+path);return {status:r.status,body:await r.json()};}
 async function playerPost(id,path,body={}){const {token}=await(await worker.fetch('https://synthetic.test/test/token/'+id)).json();const r=await worker.fetch('https://synthetic.test/api/liveops/news'+path,{method:'POST',headers:{Authorization:'Bearer '+token},body:JSON.stringify(body)});return {status:r.status,body:await r.json()};}
+test('news carries permanent unlocks in replayable receipts', async()=>{
+ const rewards=['premium','more_exp','double_loot','booster_pack','louisaUnlock','soulUnlock'].map(id=>({id,amount:1}));
+ const created=await admin('news.create',{operationId:'unlock-news-create',post:post('unlock-news',{draft:false,rewards})});
+ assert.equal(created.status,201);
+ const first=await playerPost('player-a','/unlock-news/claim',{operationId:'unlock-news-claim'});
+ assert.equal(first.status,200);assert.deepEqual(first.body.receipt.rewards.map(r=>r.id),rewards.map(r=>r.id));
+ const replay=await playerPost('player-a','/unlock-news/claim',{operationId:'unlock-news-replay'});
+ assert.deepEqual(replay.body.receipt,first.body.receipt);
+ await admin('news.archive',{operationId:'unlock-news-archive',id:'unlock-news',expectedRevision:1});
+});
 test('public schedule, drafts, expiration and bounded list/detail agree',async()=>{
  for(const [id,extra]of [['draft',{}],['future',{draft:false,publishAt:'2099-01-01T00:00:00Z'}],['expired',{draft:false,expireAt:'2000-01-01T00:00:00Z'}],['live',{draft:false}],['pinned',{draft:false,pinned:true}]])assert.equal((await admin('news.create',{operationId:'create-'+id,post:post(id,extra)})).status,201);
  const listed=await publicGet('?limit=1');assert.equal(listed.status,200);assert.deepEqual(listed.body.news.map(x=>x.id),['pinned']);assert.equal(listed.body.news[0].bodies,undefined);assert.ok(listed.body.nextCursor);assert.deepEqual((await publicGet('?limit=1&cursor='+listed.body.nextCursor)).body.news.map(x=>x.id),['live']);

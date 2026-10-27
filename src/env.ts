@@ -1,4 +1,7 @@
 export interface Env {
+  STORY_TEST_ENABLED?: string;
+  STORY_TEST_PLAYERS?: string;
+  STORY_TEST_COUPON?: string;
   EC1_MANUAL_BACKUPS_ENABLED?: string;
   DB: D1Database;
   PLAYER_SAVES: R2Bucket;
@@ -16,6 +19,8 @@ export interface Env {
   IAP_APPLE_BUNDLE_ID?: string;
   IAP_APPLE_VERIFICATION_MODE?: string;
   IAP_ALLOW_TEST_PURCHASES?: string;
+  IAP_EDITOR_TEST_ENABLED?: string;
+  IAP_EDITOR_TEST_PLAYERS?: string;
   PLAYER_TOKEN_SECRET: string;
   ADMIN_SESSION_SECRET?: string;
   // Default entrypoint; introspects the existing central admin session only.

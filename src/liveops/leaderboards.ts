@@ -24,18 +24,18 @@ async function board(env:Env, id:string):Promise<Board> {
  return result;
 }
 async function playerEntry(env:Env,b:Board,season:number,playerId:string) {
- const row=await q(env,`WITH ranked AS (SELECT e.player_id AS playerId,p.display_name AS playerName,e.score,e.character,e.floor,e.cleartime,ROW_NUMBER() OVER (ORDER BY e.score DESC,e.player_id ASC) AS rank FROM classic_leaderboard_entry e JOIN player p ON p.id=e.player_id WHERE e.board_id=? AND e.season=? AND ${visible}) SELECT * FROM ranked WHERE playerId=?`,b.id,season,now(),playerId).first<Record<string,unknown>>();
- return row?{playerId:row.playerId,playerName:safeName(row.playerName),score:row.score,record:{character:row.character,floor:row.floor,cleartime:row.cleartime},rank:row.rank}:null;
+ const row=await q(env,`WITH ranked AS (SELECT e.player_id AS playerId,p.display_name AS playerName,e.character,e.floor,e.cleartime,ROW_NUMBER() OVER (ORDER BY e.floor DESC,e.cleartime ASC,e.character DESC,e.player_id ASC) AS rank FROM classic_leaderboard_entry e JOIN player p ON p.id=e.player_id WHERE e.board_id=? AND e.season=? AND ${visible}) SELECT * FROM ranked WHERE playerId=?`,b.id,season,now(),playerId).first<Record<string,unknown>>();
+ return row?{playerId:row.playerId,playerName:safeName(row.playerName),record:{character:row.character,floor:row.floor,cleartime:row.cleartime},rank:row.rank}:null;
 }
 const metadata=(b:Board)=>({board:b.id,season:b.season,version:b.version,submissionPaused:!!b.paused,updatedAt:b.updated_at});
 function seasonNumber(value:unknown,b:Board):number { return value===undefined ? b.season : integer(typeof value==='string'?Number(value):value,1,b.season); }
 const visible = `NOT EXISTS(SELECT 1 FROM player_ban b WHERE b.player_id=e.player_id AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at>?))`;
 async function page(env:Env,b:Board,season:number,offset:number,limit:number) {
- const rows=await q(env,`SELECT e.player_id AS playerId,p.display_name AS playerName,e.score,e.character,e.floor,e.cleartime FROM classic_leaderboard_entry e JOIN player p ON p.id=e.player_id WHERE e.board_id=? AND e.season=? AND ${visible} ORDER BY e.score DESC,e.player_id ASC LIMIT ? OFFSET ?`,b.id,season,now(),limit,offset).all<Record<string,unknown>>();
- return rows.results.map((r,i)=>({playerId:r.playerId,playerName:safeName(r.playerName),score:r.score,record:{character:r.character,floor:r.floor,cleartime:r.cleartime},rank:offset+i+1}));
+ const rows=await q(env,`SELECT e.player_id AS playerId,p.display_name AS playerName,e.character,e.floor,e.cleartime FROM classic_leaderboard_entry e JOIN player p ON p.id=e.player_id WHERE e.board_id=? AND e.season=? AND ${visible} ORDER BY e.floor DESC,e.cleartime ASC,e.character DESC,e.player_id ASC LIMIT ? OFFSET ?`,b.id,season,now(),limit,offset).all<Record<string,unknown>>();
+ return rows.results.map((r,i)=>({playerId:r.playerId,playerName:safeName(r.playerName),record:{character:r.character,floor:r.floor,cleartime:r.cleartime},rank:offset+i+1}));
 }
 async function rank(env:Env,b:Board,season:number,playerId:string):Promise<number|null> {
- const result=await q(env,`WITH ranked AS (SELECT e.player_id,ROW_NUMBER() OVER (ORDER BY e.score DESC,e.player_id ASC) AS rank FROM classic_leaderboard_entry e JOIN player p ON p.id=e.player_id WHERE e.board_id=? AND e.season=? AND ${visible}) SELECT rank FROM ranked WHERE player_id=?`,b.id,season,now(),playerId).first<{rank:number}>();
+ const result=await q(env,`WITH ranked AS (SELECT e.player_id,ROW_NUMBER() OVER (ORDER BY e.floor DESC,e.cleartime ASC,e.character DESC,e.player_id ASC) AS rank FROM classic_leaderboard_entry e JOIN player p ON p.id=e.player_id WHERE e.board_id=? AND e.season=? AND ${visible}) SELECT rank FROM ranked WHERE player_id=?`,b.id,season,now(),playerId).first<{rank:number}>();
  return result?.rank??null;
 }
 async function boundedJson(request:Request):Promise<Record<string,unknown>> {
@@ -60,10 +60,9 @@ export function createLeaderboardsApp() {
   const season=integer(body.season,1,2147483647),version=integer(body.version,1,2147483647),operationId=text(body.operationId,96);
   if(!/^[A-Za-z0-9_-]+$/.test(operationId))throw new InputError('invalid_operation_id');
   const r=body.record as Record<string,unknown>;if(!r||typeof r!=='object'||Array.isArray(r)||Object.keys(r).some(k=>!['character','floor','cleartime'].includes(k)))throw new InputError('invalid_record');
-  const character=integer(r.character,0,3),floor=integer(r.floor,1,2147),cleartime=integer(r.cleartime,0,99999),score=floor*1000000-cleartime*10+character;
-  integer(score,1,2147483647);
+  const character=integer(r.character,0,3),floor=integer(r.floor,1,2147483647),cleartime=integer(r.cleartime,0,2147483647);
   const player=c.get('player').playerId,hash=await digest(JSON.stringify({version,character,floor,cleartime}));
-  const receipt=()=>q(c.env,'SELECT payload_hash,score FROM classic_leaderboard_submission WHERE board_id=? AND season=? AND player_id=? AND operation_id=?',b.id,season,player,operationId).first<{payload_hash:string;score:number}>();
+  const receipt=()=>q(c.env,'SELECT payload_hash,character,floor,cleartime FROM classic_leaderboard_submission WHERE board_id=? AND season=? AND player_id=? AND operation_id=?',b.id,season,player,operationId).first<{payload_hash:string;character:number;floor:number;cleartime:number}>();
   let saved=await receipt();
   if(!saved){
    const limitedAt=Date.now();
@@ -71,14 +70,14 @@ export function createLeaderboardsApp() {
    if(!limiter)throw new InputError('leaderboard_unavailable',503);
    if(limiter.count>30){const retryAfterSeconds=Math.max(1,Math.ceil((limiter.expires_at-limitedAt)/1000));c.header('Retry-After',String(retryAfterSeconds));return c.json({error:'rate_limited',retryAfterSeconds},429);}
    await c.env.DB.batch([
-    q(c.env,`INSERT OR IGNORE INTO classic_leaderboard_submission SELECT id,season,?,?,?, ?,? FROM classic_leaderboard_board WHERE id=? AND season=? AND version=? AND paused=0 AND NOT EXISTS(SELECT 1 FROM player_ban WHERE player_id=? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?))`,player,operationId,hash,score,now(),b.id,season,version,player,now()),
-    q(c.env,`INSERT INTO classic_leaderboard_entry SELECT board_id,season,player_id,score,?,?,?,created_at FROM classic_leaderboard_submission WHERE board_id=? AND season=? AND player_id=? AND operation_id=? AND payload_hash=? ON CONFLICT(board_id,season,player_id) DO UPDATE SET score=excluded.score,character=excluded.character,floor=excluded.floor,cleartime=excluded.cleartime,updated_at=excluded.updated_at WHERE excluded.score>classic_leaderboard_entry.score`,character,floor,cleartime,b.id,season,player,operationId,hash)
+    q(c.env,`INSERT OR IGNORE INTO classic_leaderboard_submission SELECT id,season,?,?,?,?,?,?,? FROM classic_leaderboard_board WHERE id=? AND season=? AND version=? AND paused=0 AND NOT EXISTS(SELECT 1 FROM player_ban WHERE player_id=? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?))`,player,operationId,hash,character,floor,cleartime,now(),b.id,season,version,player,now()),
+    q(c.env,`INSERT INTO classic_leaderboard_entry SELECT board_id,season,player_id,character,floor,cleartime,created_at FROM classic_leaderboard_submission WHERE board_id=? AND season=? AND player_id=? AND operation_id=? AND payload_hash=? ON CONFLICT(board_id,season,player_id) DO UPDATE SET character=excluded.character,floor=excluded.floor,cleartime=excluded.cleartime,updated_at=excluded.updated_at WHERE excluded.floor>classic_leaderboard_entry.floor OR (excluded.floor=classic_leaderboard_entry.floor AND (excluded.cleartime<classic_leaderboard_entry.cleartime OR (excluded.cleartime=classic_leaderboard_entry.cleartime AND excluded.character>classic_leaderboard_entry.character)))`,b.id,season,player,operationId,hash)
    ]);
    saved=await receipt();
   }
   if(!saved){const current=await board(c.env,b.id);throw new InputError(current.paused?'submissions_paused':'leaderboard_version_conflict',409);}
   if(saved.payload_hash!==hash)throw new InputError('operation_conflict',409);
-  return c.json({board:b.id,season,operationId,acceptedScore:saved.score,entryRank:await rank(c.env,b,season,player)});
+  return c.json({board:b.id,season,operationId,acceptedRecord:{character:saved.character,floor:saved.floor,cleartime:saved.cleartime},entryRank:await rank(c.env,b,season,player)});
  });
  return app;
 }

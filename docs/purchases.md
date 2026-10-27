@@ -1,3 +1,17 @@
+# Current purchase integration — October 27, 2026
+
+Production now implements `ec1-grants-v1` with `POST /api/purchases/guest-session`, `GET /api/purchases/account-binding`, `POST /api/purchases/validate`, and `POST /api/purchases/grants/:grantId/ack`. Additive migration 035 was applied to production. Production deployment `1a98d3e7-b036-4dbe-b346-bb80a9656251` is live at `https://ec1.gacogames.com`. Health and malformed/unauthorized endpoint probes passed without creating player identities or purchase grants. All 188 backend tests, typecheck and web build passed. Production checkout is enabled; staging and sandbox/test receipts stay disabled. The anonymous capability is limited to purchase binding, validation and acknowledgement and cannot access account/game/backups/editor/admin endpoints. A valid store receipt and its original purchase identity remain required for every new grant.
+
+Purchase rewards are issued from the server catalogue into immutable D1 grants. Ledger reservation, offer uniqueness, grant bytes and entitlement flags publish in one transaction. No gameplay save is published. Native store confirmation stays with Unity after durable local delivery. Acknowledgement is idempotent. Restore validates store ownership and returns only permanent flags with a distinct stable grant ID. Paid recovery remains available with checkout disabled, including renewing an existing guest session. Unknown guest creation is disabled while checkout is paused. Client-supplied amounts, altered proofs, pending payments, quantities other than one, foreign ownership and revoked purchases issue no grants.
+
+The client uses an existing compatible signed-in game account or silently creates an encrypted per-save guest purchase identity. A previously created guest identity takes priority after backup sign-in. Account login is not required to buy. Anonymous credentials are installation-local; gameplay backups preserve paid flags/applied grant markers but do not export those credentials. Cross-installation guest restore and old unbound receipts require support. Google verifies current state with Publisher; Apple retains the pinned-chain signed-receipt policy, with no periodic refund reconciliation/current-state API lookup. See `docs/architecture.md` for boundaries and limitations.
+
+Validation: purchase fixtures cover Google and synthetic Apple proof, guests and signed-in accounts, lost-response and concurrent retries, atomic rollback, immutable restore grants, paused checkout recovery, cross-protocol replay, and revoked ledger entries. Fixtures do not make real store or PlayFab calls. Actual signed-device purchase/deferred/restart/restore verification remains separate from source compilation and backend activation.
+
+---
+
+The following describes the historical save-linked `/claim` API. It remains disabled in manual-backup mode and is not used by the current client.
+
 # EC1 purchases foundation
 
 ## Store setup audit — 2026-10-25

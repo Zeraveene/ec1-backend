@@ -34,6 +34,17 @@ before(async () => {
   );
 });
 after(async () => await mf?.dispose());
+test("public EC1 clock needs no login or initialized player storage and returns fresh UTC", async () => {
+  const before = Date.now();
+  const response = await mf.dispatchFetch("https://ec1.fixture.invalid/api/public/time");
+  const after = Date.now();
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const clock = await response.json();
+  assert.ok(Number.isSafeInteger(clock.unixTimeMs));
+  assert.ok(clock.unixTimeMs >= before && clock.unixTimeMs <= after);
+  assert.equal(clock.serverTime, new Date(clock.unixTimeMs).toISOString());
+});
 test("immutable bound asset headers can receive security middleware without a dashboard500", async () => {
   const response = await mf.dispatchFetch("https://ec1.fixture.invalid/", {
     redirect: "manual",

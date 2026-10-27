@@ -1,5 +1,21 @@
 # Classic online coupons, personal mail and grants
 
+## Developer story-test action — October 26, 2026
+
+`STORY_TEST_COUPON` is a developer command handled before normal coupon lookup, gated by `STORY_TEST_ENABLED` and the authenticated account allowlist in `STORY_TEST_PLAYERS`. Check returns `diagnostic: full-story`; explicit `POST /api/liveops/coupons/story-test/start` returns a new run ID. It creates no reward grant and is never replayed by opening Coupons. The production client destructively resets only local gameplay through its normal import/reload transaction and retains authentication. Progress is not restored after the run. `POST /api/liveops/coupons/story-test/report` stores up to 256 KiB of diagnostic JSON in `AUDIT_BLOBS`, binding path/owner/run ID to the authenticated identity. Ordinary coupon body limits stay 4 KiB; the report envelope is bounded separately at 270 KiB. No gameplay save publication or PlayFab mutation occurs in these routes. Deploy backend and updated mobile player together; store review notes must disclose the developer diagnostic mode.
+
+## Permanent unlock rewards — October 26, 2026
+
+The existing reward array also accepts permanent ownership rewards with `amount: 1`: `louisaUnlock`, `soulUnlock`, `premium`, `more_exp` (EXP Boost), `double_loot` (Drop Boost), `booster_pack` (Dual Boost), and `costume_<alaster|edna|louisa|soul>_<1..8>`. Dual Boost sets `more_exp`, `double_loot`, and `dualTaken` together, matching the store product. These are permanent benefits, not timed ad boosts. Alaster and Edna are available by default and need no unlock reward. Store product aliases, arbitrary preference writes, and purchase/offer claim markers are not mail rewards.
+
+For example, `mail.send` may include `rewards: [{id:"premium",amount:1},{id:"booster_pack",amount:1},{id:"costume_louisa_8",amount:1},{id:"ruby",amount:100}]`. The same reward definitions work in news and coupons. The private admin catalog and standalone dashboard list all six new choices with maximum quantity 1. No migration or save-schema change is required.
+
+The backend validates and issues immutable receipts; Unity `LiveOpsRewardDelivery` applies ownership to canonical save flags in the existing atomic reward/receipt transaction. The application retains lifecycle and UI binding ownership. Unlocks never enter inventory, consume capacity, or create verified store purchase records. Already-owned unlocks are successful no-ops with no currency compensation; the receipt still commits so mixed currency/item rewards and retries remain safe. Currency and inventory portions retain their existing overflow/capacity checks and all-or-nothing delivery.
+
+Ship the updated Unity client before sending these new reward IDs to players: older clients reject them and leave their receipts pending. This implementation is local preparation; it does not deploy either service or send production mail. Online grants still do not synchronize gameplay backups or make offline progress tamper-proof.
+
+At the user's request for in-game sample mail, the reward update was deployed October 26, 2026 as Worker version `3719699f-a195-49fe-8800-8a5fbdabf524`. The isolated release uses the previously deployed clock-release snapshot plus only reward validation/catalog/dashboard changes; unrelated working-tree leaderboard changes are excluded. Typecheck, 25 focused tests and the dashboard build passed. Production variables were preserved with `--keep-vars`; no database migration was needed. Four sample mails were sent through the authenticated shared admin UI to the current user-authorized account, covering heroes, Premium, individual boosters, Dual Boost and four costumes. Unity receipt/list rendering was verified; all samples were left unclaimed for the user's manual claim test. The shared admin currently labels new non-inventory unlocks as Material because its presentation categories lack an unlock category; this does not change grant semantics.
+
 These modules only use EC1 D1. They never read/write gameplay backups, R2, PlayFab, EC2 player storage or store transactions. They are server preparation; this change does not activate or implement a Unity client.
 
 ## Immutable delivery receipts

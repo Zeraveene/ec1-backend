@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppEnv, Env } from "../env";
 import { requirePlayer } from "../auth";
+import { checkStoryTestCode, startStoryTest, storeStoryTestReport } from './story-test';
 import { GameError } from "../game/validation";
 import {
   adminFailure,
@@ -81,10 +82,10 @@ export function createCouponApp() {
   app.use("*", requirePlayer);
   app.use(
     "*",
-    bodyLimit({
-      maxSize: 4096,
+    (c, next) => bodyLimit({
+      maxSize: c.req.path.endsWith('/story-test/report') ? 270 * 1024 : 4096,
       onError: (c) => c.json({ error: "request_too_large" }, 413),
-    }),
+    })(c, next),
   );
   app.use("*", async (c, next) => {
     const now = Date.now();
@@ -125,6 +126,15 @@ export function createCouponApp() {
       ),
     ),
   );
+  app.post('/story-test/start', async c => {
+    if (c.get('player').scope !== 'player') throw new GameError('insufficient_scope', 403);
+    return c.json(startStoryTest(c.env, c.get('player').playerId, (await c.req.json())?.code));
+  });
+  // Reports are larger than coupon requests and use their own bounded body reader.
+  app.post('/story-test/report', async c => {
+    if (c.get('player').scope !== 'player') throw new GameError('insufficient_scope', 403);
+    return c.json(await storeStoryTestReport(c.env, c.get('player').playerId, await c.req.json()));
+  });
   app.post("/claim", async (c) =>
     c.json(
       await claimCoupon(
@@ -326,6 +336,8 @@ export async function checkCoupon(
   playerId: string,
   suppliedCode: unknown,
 ) {
+  const diagnostic = checkStoryTestCode(env, playerId, suppliedCode);
+  if (diagnostic) return diagnostic;
   const row = await env.DB.prepare("SELECT * FROM liveops_coupon WHERE code=?")
     .bind(code(suppliedCode))
     .first<Record<string, unknown>>();

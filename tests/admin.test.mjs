@@ -86,6 +86,8 @@ before(async () => {
   for (const file of [
     "001_auth.sql",
     "002_game.sql",
+    "030_liveops_leaderboards.sql",
+    "033_structured_fortress.sql",
     "003_admin.sql",
     "021_device_credentials.sql",
   ])

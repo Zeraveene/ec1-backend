@@ -9,7 +9,7 @@ before(async()=>{
  const built=await build({stdin:{resolveDir:process.cwd(),contents:`import * as r from './src/admin/revisions'; import {publishSnapshot} from './src/game/storage';import {nativeKeys} from './src/game/validation';export default {async fetch(req,env){try{const b=await req.json();let result;if(b.action==='keys')result=nativeKeys;else if(b.action==='seed')result=await publishSnapshot(env,b.id,b.snapshot,b.options);else result=await r[b.action](env,b.actor,b.args);return Response.json(result)}catch(e){return Response.json({error:e.code||e.message},{status:e.status||503})}}}`},bundle:true,format:'esm',write:false,platform:'browser'});
  mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:built.outputFiles[0].text,compatibilityDate:'2026-10-06',d1Databases:{DB:'revision-tests'},r2Buckets:['PLAYER_SAVES'],outboundService:()=>{throw Error('Network forbidden')}}));
  db=await mf.getD1Database('DB');bucket=await mf.getR2Bucket('PLAYER_SAVES');
- for(const file of ['001_auth.sql','002_game.sql','003_admin.sql']) for(const sql of (await readFile(`migrations/${file}`,'utf8')).split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run();
+ for(const file of ['001_auth.sql','002_game.sql','030_liveops_leaderboards.sql','033_structured_fortress.sql','003_admin.sql']) for(const sql of (await readFile(`migrations/${file}`,'utf8')).split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run();
 });
 after(async()=>mf?.dispose());
 async function call(action,args={},role='internal'){const response=await mf.dispatchFetch('http://local/',{method:'POST',body:JSON.stringify({action,args,actor:{...actor,role},...args})});return {status:response.status,body:await response.json()};}

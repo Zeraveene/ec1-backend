@@ -19,6 +19,7 @@ const write=(feature,action,args)=>req(`/liveops/${feature}/${action}`,args);
 test('direct admin transport authenticates, separates reads/writes and uses Classic catalog',async()=>{
  assert.equal((await req('/liveops/catalog',undefined,{Cookie:''})).status,401);
  const catalog=await req('/liveops/catalog');assert.equal(catalog.status,200);assert.equal(catalog.body.game,'ec1');assert.ok(catalog.body.items.some(i=>i.id==='gold'));assert.ok(catalog.body.items.some(i=>i.id==='apple'&&i.itemCategory===2));
+ for(const id of ['louisaUnlock','soulUnlock','premium','more_exp','double_loot','booster_pack'])assert.ok(catalog.body.items.some(i=>i.id===id&&i.maxAmount===1&&i.name&&i.itemCategory===undefined));
  assert.equal((await read('mail','send')).status,404);
  assert.equal((await write('coupons','list',{})).status,404);
  assert.equal((await read('__proto__','list')).status,404);

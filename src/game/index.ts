@@ -339,19 +339,19 @@ export function createGameApp(): Hono<AppEnv> {
     const time = Math.floor(Date.now() / 1000),
       p = c.get("player");
     const result = await c.env.DB.prepare(
-      "SELECT l.player_id AS playerId,COALESCE(p.display_name,'') AS playerName,l.score,l.save_version AS saveVersion FROM player_leaderboard l JOIN player p ON p.id=l.player_id WHERE l.score>0 AND NOT EXISTS(SELECT 1 FROM player_ban b WHERE b.player_id=l.player_id AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at>?)) ORDER BY l.score DESC,l.player_id LIMIT ?",
+      "SELECT l.player_id AS playerId,COALESCE(p.display_name,'') AS playerName,l.character,l.floor,l.cleartime,l.save_version AS saveVersion FROM player_leaderboard l JOIN player p ON p.id=l.player_id WHERE l.floor>0 AND NOT EXISTS(SELECT 1 FROM player_ban b WHERE b.player_id=l.player_id AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at>?)) ORDER BY l.floor DESC,l.cleartime ASC,l.character DESC,l.player_id LIMIT ?",
     )
       .bind(time, requested)
       .all();
     const mine = await c.env.DB.prepare(
-      "SELECT l.player_id AS playerId,COALESCE(p.display_name,'') AS playerName,l.score,l.save_version AS saveVersion,1+(SELECT COUNT(*) FROM player_leaderboard other WHERE (other.score>l.score OR (other.score=l.score AND other.player_id<l.player_id)) AND NOT EXISTS(SELECT 1 FROM player_ban b WHERE b.player_id=other.player_id AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at>?))) AS rank FROM player_leaderboard l JOIN player p ON p.id=l.player_id WHERE l.player_id=? AND l.score>0",
+      "SELECT l.player_id AS playerId,COALESCE(p.display_name,'') AS playerName,l.character,l.floor,l.cleartime,l.save_version AS saveVersion,1+(SELECT COUNT(*) FROM player_leaderboard other WHERE (other.floor>l.floor OR (other.floor=l.floor AND (other.cleartime<l.cleartime OR (other.cleartime=l.cleartime AND (other.character>l.character OR (other.character=l.character AND other.player_id<l.player_id)))))) AND NOT EXISTS(SELECT 1 FROM player_ban b WHERE b.player_id=other.player_id AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at>?))) AS rank FROM player_leaderboard l JOIN player p ON p.id=l.player_id WHERE l.player_id=? AND l.floor>0",
     )
       .bind(time, p.playerId)
       .first();
     return c.json({
       leaderboard: "infinity_fortress",
-      entries: result.results.map((row, i) => ({ ...row, rank: i + 1 })),
-      me: mine,
+      entries: result.results.map((row, i) => ({ playerId: row.playerId, playerName: row.playerName, saveVersion: row.saveVersion, record: { character: row.character, floor: row.floor, cleartime: row.cleartime }, rank: i + 1 })),
+      me: mine ? { playerId: mine.playerId, playerName: mine.playerName, saveVersion: mine.saveVersion, record: { character: mine.character, floor: mine.floor, cleartime: mine.cleartime }, rank: mine.rank } : null,
     });
   });
   app.put("/save", async (c) => {

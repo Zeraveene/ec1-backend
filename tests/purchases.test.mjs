@@ -5,6 +5,7 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import {
   webcrypto,
+  createHash,
   X509Certificate,
   createPrivateKey,
   sign,
@@ -143,7 +144,7 @@ before(async () => {
     client_email: "synthetic-ec1@fixture.invalid",
     private_key: `-----BEGIN PRIVATE KEY-----\n${base64(await webcrypto.subtle.exportKey("pkcs8", publisherPair.privateKey))}\n-----END PRIVATE KEY-----`,
   });
-  const contents = `import {Hono} from 'hono';import {createAuthApp} from './src/auth';import {createPurchasesApp} from './src/purchases';import {createGameApp,publishSnapshot} from './src/game';import {nativeKeys} from './src/game/validation';const app=new Hono();app.route('/api/auth',createAuthApp());app.route('/api/game',createGameApp());app.route('/api/purchases',createPurchasesApp());app.post('/test/disabled',async c=>createPurchasesApp().fetch(new Request('https://ec1.local/claim',c.req.raw),{...c.env,IAP_PURCHASES_ENABLED:'false'},c.executionCtx));app.post('/test/save',async c=>{const b=await c.req.json(),prefs=Object.fromEntries(nativeKeys.map(k=>[k,'0'])),attributes=JSON.stringify({level:1,exp:0,s_top:'',s_glove:'',s_shoes:'',s_weapon:''});Object.assign(prefs,{alaster_attributes:attributes,edna_attributes:attributes,louisa_attributes:'',soul_attributes:'',gamedata:JSON.stringify({gold:0,ruby:0,stageProgress:1,tutorialProgress:0,timeCounter:10,usedCoupons:[],stageInfo:[],stat_goldEarned:0,stat_rubyEarned:0}),inventory:'^^',consumable:'',LastRewardTime:'',selected:'alaster',achievements_new:Array(27).fill('0').join('|'),lbId:'',lbName:''});return c.json(await publishSnapshot(c.env,b.playerId,{game:'ec1',schemaVersion:1,playtime:10,data:{CLOUD_ALL_DATA:JSON.stringify(prefs),Playtime:'10'},expectedSaveVersion:0,operationId:b.operationId,intent:'new_game'}));});app.onError((e,c)=>c.json({error:e.code||'error'},e.status||503));export default app;`;
+  const contents = `import {Hono} from 'hono';import {createAuthApp} from './src/auth';import {createPurchasesApp} from './src/purchases';import {createGameApp,publishSnapshot} from './src/game';import {nativeKeys} from './src/game/validation';const app=new Hono();app.route('/api/auth',createAuthApp());app.route('/api/game',createGameApp());app.route('/api/purchases',createPurchasesApp());app.post('/test/disabled',async c=>createPurchasesApp().fetch(new Request('https://ec1.local/claim',c.req.raw),{...c.env,IAP_PURCHASES_ENABLED:'false'},c.executionCtx));app.all('/test/paused/*',c=>new Hono().route('/api/purchases',createPurchasesApp()).fetch(new Request('https://ec1.local/api/purchases/'+c.req.path.slice('/test/paused/'.length)+new URL(c.req.url).search,c.req.raw),{...c.env,ALLOW_NEW_ACCOUNTS:'false',IAP_PURCHASES_ENABLED:'false'},c.executionCtx));app.post('/test/save',async c=>{const b=await c.req.json(),prefs=Object.fromEntries(nativeKeys.map(k=>[k,'0'])),attributes=JSON.stringify({level:1,exp:0,s_top:'',s_glove:'',s_shoes:'',s_weapon:''});Object.assign(prefs,{alaster_attributes:attributes,edna_attributes:attributes,louisa_attributes:'',soul_attributes:'',gamedata:JSON.stringify({gold:0,ruby:0,stageProgress:1,tutorialProgress:0,timeCounter:10,usedCoupons:[],stageInfo:[],stat_goldEarned:0,stat_rubyEarned:0}),inventory:'^^',consumable:'',LastRewardTime:'',selected:'alaster',achievements_new:Array(27).fill('0').join('|'),lbId:'',lbName:''});return c.json(await publishSnapshot(c.env,b.playerId,{game:'ec1',schemaVersion:1,playtime:10,data:{CLOUD_ALL_DATA:JSON.stringify(prefs),Playtime:'10'},expectedSaveVersion:0,operationId:b.operationId,intent:'new_game'}));});app.onError((e,c)=>c.json({error:e.code||'error'},e.status||503));export default app;`;
   const bundled = await build({
     stdin: { contents, resolveDir: process.cwd() },
     bundle: true,
@@ -249,9 +250,12 @@ before(async () => {
   for (const file of [
     "001_auth.sql",
     "002_game.sql",
+    "030_liveops_leaderboards.sql",
+    "033_structured_fortress.sql",
     "003_admin.sql",
     "020_purchases.sql",
     "021_device_credentials.sql",
+    "035_purchase_grants.sql",
   ])
     for (const statement of (await readFile(`migrations/${file}`, "utf8"))
       .split(";")
@@ -867,4 +871,134 @@ test("fresh account without initial save retains verified pending purchase and r
     JSON.parse(JSON.parse(grant.data.CLOUD_ALL_DATA).gamedata).ruby,
     9,
   );
+});
+
+const hex = s => createHash('sha256').update(s).digest('hex');
+let guestSession, guestBinding;
+async function modernProof(sku, name, owner=guestSession.playerId, account=guestBinding.googleObfuscatedAccountId) {
+ const p=await proof(sku,name,account);
+ delete p.expectedSaveVersion;
+ p.protocol='ec1-grants-v1';p.mode='purchase';
+ p.operationId=hex('ec1/purchase/v1/'+owner+'/google:'+hex(name));
+ return p;
+}
+test('guest checkout needs no game login; capability is stable, scoped and secret-bound',async()=>{
+ const credential={id:'a'.repeat(32),secret:'b'.repeat(64)};
+ guestSession=await request('/api/purchases/guest-session',credential,'POST',null);
+ assert.equal(guestSession.status,200,JSON.stringify(guestSession));
+ assert.equal(guestSession.playerId,'EC1G_'+credential.id);
+ assert.equal((await request('/api/purchases/guest-session',credential,'POST',null)).playerId,guestSession.playerId);
+ assert.equal((await request('/api/purchases/guest-session',{...credential,secret:'c'.repeat(64)},'POST',null)).status,401);
+ assert.equal((await request('/api/game/readiness',null,'GET',guestSession.accessToken)).status,401);
+ assert.equal((await request('/api/purchases/ledger',null,'GET',guestSession.accessToken)).status,403);
+ assert.equal((await request('/api/purchases/account-binding',null,'GET',null)).status,401);
+ guestBinding=await request('/api/purchases/account-binding',null,'GET',guestSession.accessToken);
+ assert.equal(guestBinding.deliveryProtocol,'ec1-grants-v1');
+ assert.match(guestBinding.googleObfuscatedAccountId,/^[a-f0-9]{64}$/);
+ assert.ok(guestBinding.enabledProductIds.includes('ruby1'));
+ assert.ok(!guestBinding.enabledProductIds.includes('starter'));
+ assert.equal((await db.prepare('SELECT count(*) n FROM auth_identity WHERE player_id=?').bind(guestSession.playerId).first()).n,0);
+});
+test('production grants are immutable across concurrent validation and create no gameplay backups',async()=>{
+ const input=await modernProof('ruby1','modern-sale');
+ const send=()=>request('/api/purchases/validate',input,'POST',guestSession.accessToken);
+ const [a,b]=await Promise.all([send(),send()]);
+ assert.equal(a.status,200,JSON.stringify(a));assert.deepEqual(a,b);
+ assert.equal(a.purchaseKey,'google:'+hex('modern-sale'));assert.equal(a.rewards[0].amount,9);
+ assert.equal(a.data,undefined);assert.equal(a.saveVersion,undefined);
+ assert.equal((await db.prepare('SELECT count(*) n FROM save_revision WHERE player_id=?').bind(guestSession.playerId).first()).n,0);
+ storeUnavailable=true;
+ assert.deepEqual(await send(),a);
+ storeUnavailable=false;
+ const ack='/api/purchases/grants/'+a.grantId+'/ack';
+ assert.equal((await request(ack,{operationId:input.operationId},'POST',other.accessToken)).status,404);
+ assert.equal((await request(ack,{operationId:input.operationId},'POST',guestSession.accessToken)).status,200);
+ assert.equal((await request(ack,{operationId:input.operationId},'POST',guestSession.accessToken)).status,200);
+ assert.equal((await db.prepare('SELECT status FROM purchase_ledger WHERE purchase_key=?').bind(a.purchaseKey).first()).status,'granted');
+});
+test('forged, pending, foreign, wrong quantity, test payments and client rewards never issue grants',async()=>{
+ for(const [name,patch] of [['pending',{purchaseStateContext:{purchaseState:'PENDING'}}],['quantity',{productLineItem:[{productId:'ruby1',productOfferDetails:{quantity:2}}]}],['foreign',{obfuscatedExternalAccountId:'foreign'}],['test',{testPurchaseContext:{fopType:'TEST'}}]]){
+  const input=await modernProof('ruby1','modern-'+name);
+  Object.assign(facts.get('modern-'+name),patch);
+  const r=await request('/api/purchases/validate',input,'POST',guestSession.accessToken);assert.notEqual(r.status,200,JSON.stringify(r));
+  assert.equal((await db.prepare('SELECT count(*) n FROM purchase_grant WHERE purchase_key=?').bind('google:'+hex('modern-'+name)).first()).n,0);
+ }
+ const p=await modernProof('ruby1','modern-forged');
+ assert.equal((await request('/api/purchases/validate',{...p,receiptJson:p.receiptJson+' '},'POST',guestSession.accessToken)).status,401);
+ assert.equal((await request('/api/purchases/validate',{...p,rewards:[{id:'ruby',amount:999}]},'POST',guestSession.accessToken)).status,400);
+ assert.equal((await request('/api/purchases/validate',p,'POST',other.accessToken)).status,409);
+});
+test('restore grants return only permanent flags and never replay currency or material bundles',async()=>{
+ const p=await modernProof('stepup_1','modern-stepup');
+ const sale=await request('/api/purchases/validate',p,'POST',guestSession.accessToken);assert.equal(sale.status,200,JSON.stringify(sale));
+ assert.ok(sale.rewards.length>1);assert.equal(sale.entitlements.stepUp1,1);
+ const restored=await request('/api/purchases/validate',{...p,mode:'restore'},'POST',guestSession.accessToken);
+ assert.equal(restored.status,200,JSON.stringify(restored));assert.deepEqual(restored.rewards,[]);assert.equal(restored.kind,'entitlement-restore');
+ assert.equal(restored.entitlements.stepUp1,1);assert.notEqual(restored.grantId,sale.grantId);
+ assert.deepEqual(await request('/api/purchases/validate',{...p,mode:'restore'},'POST',guestSession.accessToken),restored);
+ const q=await modernProof('ruby1','modern-currency-restore');q.mode='restore';
+ assert.equal((await request('/api/purchases/validate',q,'POST',guestSession.accessToken)).status,422);
+ const second=await modernProof('stepup_1','modern-stepup-second');
+ assert.equal((await request('/api/purchases/validate',second,'POST',guestSession.accessToken)).status,409);
+ const old=await modernProof('stepup_2','modern-restore-first');old.mode='restore';
+ assert.equal((await request('/api/purchases/validate',old,'POST',guestSession.accessToken)).status,200);
+ assert.equal((await request('/api/purchases/validate',{...old,mode:'purchase'},'POST',guestSession.accessToken)).status,409);
+});
+test('grant publication failure rolls back reservation and can be retried without duplicate value',async()=>{
+ const p=await modernProof('ruby2','modern-rollback');
+ await db.prepare("CREATE TRIGGER fail_modern_grant BEFORE INSERT ON purchase_grant BEGIN SELECT RAISE(ABORT,'synthetic failure'); END").run();
+ assert.equal((await request('/api/purchases/validate',p,'POST',guestSession.accessToken)).status,503);
+ assert.equal((await db.prepare('SELECT count(*) n FROM purchase_ledger WHERE purchase_key=?').bind('google:'+hex('modern-rollback')).first()).n,0);
+ await db.prepare('DROP TRIGGER fail_modern_grant').run();
+ assert.equal((await request('/api/purchases/validate',p,'POST',guestSession.accessToken)).status,200);
+});
+
+test('Apple signed production grant and entitlement-only restore use the same guest contract',async()=>{
+ const payload={bundleId:packageName,productId:'iap_premium',transactionId:'modern-apple-paid',purchaseDate:Date.now(),signedDate:Date.now(),quantity:1,environment:'Production',appAccountToken:guestBinding.appleAppAccountToken};
+ const signed=value=>{
+  const h=Buffer.from(JSON.stringify({alg:'ES256',x5c:appleChain})).toString('base64url'),p=Buffer.from(JSON.stringify(value)).toString('base64url');
+  return h+'.'+p+'.'+sign('sha256',Buffer.from(h+'.'+p),{key:appleLeafKey,dsaEncoding:'ieee-p1363'}).toString('base64url');
+ };
+ const input={protocol:'ec1-grants-v1',platform:'apple',mode:'purchase',productId:'iap_premium',operationId:hex('ec1/purchase/v1/'+guestSession.playerId+'/apple:modern-apple-paid'),jwsReceipt:signed(payload)};
+ const sale=await request('/api/purchases/validate',input,'POST',guestSession.accessToken);
+ assert.equal(sale.status,200,JSON.stringify(sale));assert.equal(sale.entitlements.premium,1);assert.equal(sale.environment,'production');
+ assert.equal((await db.prepare('SELECT transaction_id FROM purchase_ledger WHERE purchase_key=?').bind(sale.purchaseKey).first()).transaction_id,'modern-apple-paid');
+ const restore=await request('/api/purchases/validate',{...input,mode:'restore'},'POST',guestSession.accessToken);
+ assert.equal(restore.status,200);assert.equal(restore.kind,'entitlement-restore');assert.deepEqual(restore.rewards,[]);
+ const revoked=await request('/api/purchases/validate',{...input,mode:'restore',jwsReceipt:signed({...payload,revocationDate:Date.now()})},'POST',guestSession.accessToken);
+ assert.equal(revoked.status,401);
+});
+
+test('guest recovery survives paused checkout with new account creation disabled',async()=>{
+ const credential={id:'a'.repeat(32),secret:'b'.repeat(64)};
+ assert.equal((await request('/test/paused/guest-session',credential,'POST',null)).status,200);
+ assert.equal((await request('/test/paused/guest-session',{id:'d'.repeat(32),secret:'e'.repeat(64)},'POST',null)).status,503);
+ const b=await request('/test/paused/account-binding',null,'GET',guestSession.accessToken);
+ assert.equal(b.purchasesEnabled,false);assert.deepEqual(b.enabledProductIds,[]);assert.equal(b.deliveryProtocol,'ec1-grants-v1');
+ const p=await modernProof('ruby1','modern-sale');storeUnavailable=true;
+ const r=await request('/test/paused/validate',p,'POST',guestSession.accessToken);storeUnavailable=false;
+ assert.equal(r.status,200);assert.equal(r.rewards[0].amount,9);
+ const pending=await modernProof('ruby1','modern-paid-before-pause');
+ assert.equal((await request('/test/paused/validate',pending,'POST',guestSession.accessToken)).status,200);
+});
+
+test('signed-in accounts use the grant API and cannot claim its value again through the old save writer',async()=>{
+ const input=await modernProof('ruby1','modern-account-sale',player.playerId,binding.googleObfuscatedAccountId);
+ const originalVersion=(await db.prepare('SELECT save_version FROM player WHERE id=?').bind(player.playerId).first()).save_version;
+ const r=await request('/api/purchases/validate',input,'POST');assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.playerId,player.playerId);
+ const legacy={...input,expectedSaveVersion:originalVersion,operationId:'legacy-double-spend'};
+ const again=await request('/api/purchases/claim',legacy,'POST');assert.equal(again.status,409);assert.equal(again.error,'purchase_delivery_protocol_required');
+ assert.equal((await db.prepare('SELECT save_version FROM player WHERE id=?').bind(player.playerId).first()).save_version,originalVersion);
+ await db.prepare("UPDATE purchase_ledger SET status='revoked' WHERE purchase_key=?").bind(r.purchaseKey).run();
+ assert.equal((await request('/api/purchases/validate',input,'POST')).status,403);
+ assert.equal((await request('/api/purchases/grants/'+r.grantId+'/ack',{operationId:input.operationId},'POST')).status,403);
+});
+
+test('native binding advertises only its configured platform catalogue',async()=>{
+ const google=await request('/api/purchases/account-binding?platform=google',null,'GET',guestSession.accessToken);
+ const apple=await request('/api/purchases/account-binding?platform=apple',null,'GET',guestSession.accessToken);
+ assert.ok(google.enabledProductIds.includes('premium'));assert.ok(!google.enabledProductIds.includes('iap_premium'));
+ assert.ok(apple.enabledProductIds.includes('iap_premium'));assert.ok(!apple.enabledProductIds.includes('premium'));
+ assert.ok(google.enabledProductIds.includes('ruby1')&&apple.enabledProductIds.includes('ruby1'));
+ assert.equal((await request('/api/purchases/account-binding?platform=invalid',null,'GET',guestSession.accessToken)).status,400);
 });

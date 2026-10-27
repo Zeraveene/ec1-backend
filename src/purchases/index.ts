@@ -1,8 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
-import { requirePlayer } from "../auth";
 import { AuthError } from "../auth/providers";
-import { hash } from "../auth/crypto";
 import { rateLimit } from "../auth/maintenance";
 import {
   loadSnapshot,
@@ -18,26 +16,10 @@ import {
 } from "./receipts";
 import { PurchaseError, verifyStore } from "./store";
 import { productGrant } from "./catalog";
-type Binding = { google_account_id: string; apple_account_token: string };
-async function accountBinding(env: Env, id: string): Promise<Binding> {
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO purchase_account_binding(player_id,google_account_id,apple_account_token,created_at) VALUES(?,?,?,?)",
-  )
-    .bind(
-      id,
-      await hash(`ec1/store-account/v1/${id}`),
-      crypto.randomUUID(),
-      Date.now(),
-    )
-    .run();
-  const row = await env.DB.prepare(
-    "SELECT google_account_id,apple_account_token FROM purchase_account_binding WHERE player_id=?",
-  )
-    .bind(id)
-    .first<Binding>();
-  if (!row) throw new PurchaseError("purchase_service_unavailable", 503);
-  return row;
-}
+import { installEditorPurchaseRoutes } from "./editor-test";
+import { accountBinding, hex, protocol } from './binding';
+import { installPurchaseIdentity } from './guest';
+import { installGrantRoutes, configuredProducts } from './grants';
 function field(body: Record<string, unknown>, key: string, max = 65536) {
   const value = body[key];
   if (typeof value !== "string" || !value || value.length > max)
@@ -99,19 +81,26 @@ export function createPurchasesApp() {
             )
         : c.json({ error: "purchase_service_unavailable" }, 503),
   );
-  app.use("*", requirePlayer);
+  installPurchaseIdentity(app);
   app.use("*", async (c, next) => {
     if (c.get("player").scope !== "player")
       return c.json({ error: "insufficient_scope" }, 403);
     await next();
   });
+  installEditorPurchaseRoutes(app);
+  installGrantRoutes(app);
   app.get("/account-binding", async (c) => {
+    const platform = c.req.query('platform');
+    if (platform !== undefined && platform !== 'google' && platform !== 'apple') throw new PurchaseError('invalid_purchase_request');
+    const products = configuredProducts(c.env, platform);
     const b = await accountBinding(c.env, c.get("player").playerId);
     return c.json({
       game: "ec1",
       googleObfuscatedAccountId: b.google_account_id,
       appleAppAccountToken: b.apple_account_token,
-      purchasesEnabled: c.env.IAP_PURCHASES_ENABLED === "true",
+      purchasesEnabled: products.length > 0,
+      deliveryProtocol: protocol,
+      enabledProductIds: products,
     });
   });
   app.get("/ledger", async (c) =>
@@ -180,7 +169,7 @@ export function createPurchasesApp() {
             receipt: field(b, "jwsReceipt"),
             claimedProductId: productId,
           });
-    const purchaseKey = `${platform}:${platform === "google" ? await hash(verified.purchaseToken!) : verified.transactionId}`;
+    const purchaseKey = `${platform}:${platform === "google" ? await hex(verified.purchaseToken!) : verified.transactionId}`;
     let row = await c.env.DB.prepare(
       "SELECT * FROM purchase_ledger WHERE purchase_key=?",
     )
@@ -204,6 +193,8 @@ export function createPurchasesApp() {
           ),
         );
     }
+    if (await c.env.DB.prepare("SELECT 1 FROM purchase_grant WHERE purchase_key=?").bind(purchaseKey).first())
+      throw new PurchaseError("purchase_delivery_protocol_required",409);
     const facts = await verifyStore(c.env, verified, binding);
     try {
       await c.env.DB.prepare(

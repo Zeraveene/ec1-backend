@@ -19,7 +19,7 @@ before(async()=>{
   }},
   {name:'central',modules:true,compatibilityDate:'2026-10-06',script:`export default {fetch(req){const cookie=req.headers.get('Cookie');if(!cookie)return Response.json({error:'unauthenticated'},{status:401});return Response.json({discordId:cookie.includes('second')?'222222222222222222':'111111111111111111',username:'Synthetic admin',role:cookie.includes('guest')?'guest':cookie.includes('manager')?'manager':'internal'});}};`},
  ]}));db=await mf.getD1Database('DB','classic');archives=await mf.getR2Bucket('LEGACY_ARCHIVE','classic');saves=await mf.getR2Bucket('PLAYER_SAVES','classic');
- for(const file of ['001_auth.sql','002_game.sql','003_admin.sql','025_legacy_admin_revisions.sql'])for(const sql of (await readFile('migrations/'+file,'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await db.prepare(sql).run();
+ for(const file of ['001_auth.sql','002_game.sql','030_liveops_leaderboards.sql','033_structured_fortress.sql','003_admin.sql','025_legacy_admin_revisions.sql'])for(const sql of (await readFile('migrations/'+file,'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await db.prepare(sql).run();
 });
 after(async()=>mf?.dispose());
 async function req(path,body,cookie='internal') {const response=await mf.dispatchFetch(origin+'/api/classic-admin/legacy/'+path,{method:body===undefined?'GET':'POST',headers:{...(cookie?{Cookie:'ec2mod_session='+cookie}:{}),...(body===undefined?{}:{Origin:origin,'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:response.status,body:await response.json()};}

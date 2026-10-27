@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import itemCatalog from "../src/game/item-catalog.json";
+import { unlockRewards } from "../src/game/unlock-rewards";
 import "./style.css";
 
 async function api(
@@ -31,6 +32,7 @@ const format = (value: unknown) => JSON.stringify(value, null, 2);
 const rewardOptions = [
   { id: "ruby", name: "Ruby", max: 2147483647 },
   { id: "gold", name: "Gold", max: 2147483647 },
+  ...Object.entries(unlockRewards).map(([id, reward]) => ({ id, name: reward.name, max: 1 })),
   ...Object.entries(itemCatalog).map(([id, { item }]) => ({
     id,
     name: item.m_name,

@@ -47,3 +47,6 @@ The current Classic verifier persists environment, quantity, verification source
 ## Validation
 
 `node --test tests/purchase-admin.test.mjs` bundles the real dispatcher and executes it in Miniflare against isolated D1 with every local migration and synthetic ledger/player data. Tests cover role fail-closure, day windows, production/test/sandbox separation, equal-time keyset pages, Unicode and literal wildcard search, safe Google order search, malformed/extra arguments, safe details, missing finance, malformed facts and redacted database outages. Outbound requests are forbidden. `npm run typecheck` validates the integrated TypeScript contract.
+
+
+October 27 update: `deliveryProtocolReady` is true for the implemented immutable grant API. `purchasesEnabled` reflects the checkout flag plus at least one configured platform; manual-backup mode no longer disables the new delivery protocol. Financial reporting and refund reconciliation readiness remain false.

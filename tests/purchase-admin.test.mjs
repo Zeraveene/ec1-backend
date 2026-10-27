@@ -55,9 +55,9 @@ test('rejects non-internal and malformed or excessive arguments before reading d
  for(const id of ['google:private-token-hash','p_0','p_01','p_zzzzzzzzzzz',123])assert.equal((await call('purchases.detail',{id})).status,400);
  assert.equal((await call('purchases.detail',{id:'p_z'})).status,404);assert.equal((await call('purchases.mutate')).status,400);
 });
-test('readiness reflects effective legacy claim gates without exposing private configuration',async()=>{
- for(const [flags,enabled] of [[{},false],[{IAP_PURCHASES_ENABLED:'true'},true],[{IAP_PURCHASES_ENABLED:'true',EC1_MANUAL_BACKUPS_ENABLED:'true'},false],[{IAP_PURCHASES_ENABLED:'TRUE'},false]]) {
-  const res=await call('purchases.analytics',{},'internal',{...flags,IAP_GOOGLE_SERVICE_ACCOUNT:'private-credential'});assert.equal(res.body.readiness.purchasesEnabled,enabled);assert.equal(res.body.readiness.deliveryProtocolReady,false);assert.doesNotMatch(JSON.stringify(res),/private-credential|IAP_GOOGLE_SERVICE_ACCOUNT/);
+test('readiness reflects modern grant checkout readiness without exposing private configuration',async()=>{
+ for(const [flags,enabled] of [[{},false],[{IAP_PURCHASES_ENABLED:'true',IAP_APPLE_BUNDLE_ID:'com.gacogames.epiccon',IAP_APPLE_VERIFICATION_MODE:'receipt'},true],[{IAP_PURCHASES_ENABLED:'true',EC1_MANUAL_BACKUPS_ENABLED:'true',IAP_APPLE_BUNDLE_ID:'com.gacogames.epiccon',IAP_APPLE_VERIFICATION_MODE:'receipt'},true],[{IAP_PURCHASES_ENABLED:'TRUE'},false]]) {
+  const res=await call('purchases.analytics',{},'internal',{...flags,IAP_GOOGLE_SERVICE_ACCOUNT:'private-credential'});assert.equal(res.body.readiness.purchasesEnabled,enabled);assert.equal(res.body.readiness.deliveryProtocolReady,true);assert.doesNotMatch(JSON.stringify(res),/private-credential|IAP_GOOGLE_SERVICE_ACCOUNT/);
  }
 });
 test('malformed facts fall back to ledger time; arbitrary extra finance fields are ignored; errors are redacted',async()=>{

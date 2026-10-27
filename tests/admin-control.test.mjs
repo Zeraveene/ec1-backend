@@ -40,7 +40,7 @@ before(async()=>{
   ]}));
   db=await mf.getD1Database('DB','classic');central=await mf.getD1Database('DB','central');
   await central.exec("CREATE TABLE state(mode TEXT); INSERT INTO state VALUES('internal');");
-  for(const file of ['001_auth.sql','002_game.sql','003_admin.sql','010_recovery.sql','020_purchases.sql','021_device_credentials.sql','022_admin_identity.sql'])
+  for(const file of ['001_auth.sql','002_game.sql','030_liveops_leaderboards.sql','033_structured_fortress.sql','003_admin.sql','010_recovery.sql','020_purchases.sql','021_device_credentials.sql','022_admin_identity.sql'])
     for(const sql of (await readFile(`migrations/${file}`,'utf8')).split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run();
   for(const id of ['source','destination'])await db.prepare('INSERT INTO player(id,created_at,updated_at) VALUES(?,0,0)').bind(id).run();
   await db.prepare("INSERT INTO auth_identity VALUES('email','source@example.invalid','source','old-hash','old-salt',1)").run();

@@ -165,6 +165,8 @@ before(async () => {
   for (const file of [
     "001_auth.sql",
     "002_game.sql",
+    "030_liveops_leaderboards.sql",
+    "033_structured_fortress.sql",
     "021_device_credentials.sql",
   ])
     for (const statement of (await readFile(`migrations/${file}`, "utf8"))
@@ -587,6 +589,8 @@ test("intercepted legacy migration proves source/device ownership, archives both
     for (const file of [
       "001_auth.sql",
       "002_game.sql",
+    "030_liveops_leaderboards.sql",
+    "033_structured_fortress.sql",
       "021_device_credentials.sql",
     ])
       for (const sql of (await readFile(`migrations/${file}`, "utf8"))
@@ -860,7 +864,7 @@ test("Fortress leaderboard attests versioned record and display name; arbitrary 
     s = snapshot(0, "fortress-save", 3, 100);
   const prefs = JSON.parse(s.data.CLOUD_ALL_DATA),
     gd = JSON.parse(prefs.gamedata);
-  gd.fortress_edna = { character: 1, floor: 10, cleartime: 123 };
+  gd.fortress_edna = { character: 1, floor: 5000, cleartime: 120000 };
   prefs.gamedata = JSON.stringify(gd);
   s.data.CLOUD_ALL_DATA = JSON.stringify(prefs);
   assert.equal(
@@ -895,7 +899,7 @@ test("Fortress leaderboard attests versioned record and display name; arbitrary 
     "GET",
     user.accessToken,
   );
-  assert.equal(board.me.score, 10_000_000 - 1230 + 1);
+  assert.deepEqual(board.me.record, { character: 1, floor: 5000, cleartime: 120000 });
   assert.equal(board.me.saveVersion, 1);
   assert.equal(board.me.playerName, "Fixture Hero");
   assert.equal(board.me.rank, 1);
@@ -1302,6 +1306,8 @@ test("verified legacy CustomID cutover binds random native device credential aft
     for (const file of [
       "001_auth.sql",
       "002_game.sql",
+    "030_liveops_leaderboards.sql",
+    "033_structured_fortress.sql",
       "021_device_credentials.sql",
     ])
       for (const statement of (await readFile(`migrations/${file}`, "utf8"))

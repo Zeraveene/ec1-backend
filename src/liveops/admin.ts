@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { itemCatalog } from '../game/rewards';
+import { unlockRewards } from '../game/unlock-rewards';
 import { dispatchCouponAdmin } from './coupons';
 import { dispatchMailAdmin } from './mail';
 import { dispatchNewsAdmin } from './news';
@@ -26,6 +27,7 @@ export async function dispatchLiveopsAdmin(env: Env, actor: AdminActor, role: Ad
 export function rewardCatalog() {
     return { game: 'ec1', items: [
             { id: 'gold', name: 'Gold', maxAmount: 2147483647 }, { id: 'ruby', name: 'Ruby', maxAmount: 2147483647 },
+            ...Object.entries(unlockRewards).map(([id, reward]) => ({ id, name: reward.name, maxAmount: 1 })),
             ...Object.entries(itemCatalog).map(([id, entry]) => ({ id, name: entry.item.m_name, itemCategory: entry.category, maxAmount: entry.item.stack })),
             ...['alaster', 'edna', 'louisa', 'soul'].flatMap(hero => Array.from({ length: 8 }, (_, i) => ({ id: `costume_${hero}_${i + 1}`, name: `${hero} costume ${i + 1}`, maxAmount: 1 }))),
         ] };
