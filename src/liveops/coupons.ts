@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppEnv, Env } from "../env";
 import { requirePlayer } from "../auth";
-import { checkStoryTestCode, startStoryTest, storeStoryTestReport } from './story-test';
+import { checkStoryTestCode, startStoryTest, startTestCommand, storeStoryTestReport } from './story-test';
 import { GameError } from "../game/validation";
 import {
   adminFailure,
@@ -129,6 +129,10 @@ export function createCouponApp() {
   app.post('/story-test/start', async c => {
     if (c.get('player').scope !== 'player') throw new GameError('insufficient_scope', 403);
     return c.json(startStoryTest(c.env, c.get('player').playerId, (await c.req.json())?.code));
+  });
+  app.post('/test-command/start', async c => {
+    if (c.get('player').scope !== 'player') throw new GameError('insufficient_scope', 403);
+    return c.json(startTestCommand(c.env, c.get('player').playerId, (await c.req.json())?.code));
   });
   // Reports are larger than coupon requests and use their own bounded body reader.
   app.post('/story-test/report', async c => {

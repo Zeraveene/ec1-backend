@@ -19,6 +19,7 @@ export interface Env {
   IAP_APPLE_BUNDLE_ID?: string;
   IAP_APPLE_VERIFICATION_MODE?: string;
   IAP_ALLOW_TEST_PURCHASES?: string;
+  IAP_TEST_PURCHASE_PLAYERS?: string;
   IAP_EDITOR_TEST_ENABLED?: string;
   IAP_EDITOR_TEST_PLAYERS?: string;
   PLAYER_TOKEN_SECRET: string;

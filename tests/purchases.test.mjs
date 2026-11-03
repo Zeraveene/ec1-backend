@@ -144,7 +144,7 @@ before(async () => {
     client_email: "synthetic-ec1@fixture.invalid",
     private_key: `-----BEGIN PRIVATE KEY-----\n${base64(await webcrypto.subtle.exportKey("pkcs8", publisherPair.privateKey))}\n-----END PRIVATE KEY-----`,
   });
-  const contents = `import {Hono} from 'hono';import {createAuthApp} from './src/auth';import {createPurchasesApp} from './src/purchases';import {createGameApp,publishSnapshot} from './src/game';import {nativeKeys} from './src/game/validation';const app=new Hono();app.route('/api/auth',createAuthApp());app.route('/api/game',createGameApp());app.route('/api/purchases',createPurchasesApp());app.post('/test/disabled',async c=>createPurchasesApp().fetch(new Request('https://ec1.local/claim',c.req.raw),{...c.env,IAP_PURCHASES_ENABLED:'false'},c.executionCtx));app.all('/test/paused/*',c=>new Hono().route('/api/purchases',createPurchasesApp()).fetch(new Request('https://ec1.local/api/purchases/'+c.req.path.slice('/test/paused/'.length)+new URL(c.req.url).search,c.req.raw),{...c.env,ALLOW_NEW_ACCOUNTS:'false',IAP_PURCHASES_ENABLED:'false'},c.executionCtx));app.post('/test/save',async c=>{const b=await c.req.json(),prefs=Object.fromEntries(nativeKeys.map(k=>[k,'0'])),attributes=JSON.stringify({level:1,exp:0,s_top:'',s_glove:'',s_shoes:'',s_weapon:''});Object.assign(prefs,{alaster_attributes:attributes,edna_attributes:attributes,louisa_attributes:'',soul_attributes:'',gamedata:JSON.stringify({gold:0,ruby:0,stageProgress:1,tutorialProgress:0,timeCounter:10,usedCoupons:[],stageInfo:[],stat_goldEarned:0,stat_rubyEarned:0}),inventory:'^^',consumable:'',LastRewardTime:'',selected:'alaster',achievements_new:Array(27).fill('0').join('|'),lbId:'',lbName:''});return c.json(await publishSnapshot(c.env,b.playerId,{game:'ec1',schemaVersion:1,playtime:10,data:{CLOUD_ALL_DATA:JSON.stringify(prefs),Playtime:'10'},expectedSaveVersion:0,operationId:b.operationId,intent:'new_game'}));});app.onError((e,c)=>c.json({error:e.code||'error'},e.status||503));export default app;`;
+  const contents = `import {Hono} from 'hono';import {createAuthApp} from './src/auth';import {createPurchasesApp} from './src/purchases';import {createGameApp,publishSnapshot} from './src/game';import {nativeKeys} from './src/game/validation';const app=new Hono();app.route('/api/auth',createAuthApp());app.route('/api/game',createGameApp());app.route('/api/purchases',createPurchasesApp());app.post('/test/sandbox/:id',c=>new Hono().route('/api/purchases',createPurchasesApp()).fetch(new Request('https://ec1.local/api/purchases/validate',c.req.raw),{...c.env,IAP_TEST_PURCHASE_PLAYERS:c.req.param('id')},c.executionCtx));app.post('/test/disabled',async c=>createPurchasesApp().fetch(new Request('https://ec1.local/claim',c.req.raw),{...c.env,IAP_PURCHASES_ENABLED:'false'},c.executionCtx));app.all('/test/paused/*',c=>new Hono().route('/api/purchases',createPurchasesApp()).fetch(new Request('https://ec1.local/api/purchases/'+c.req.path.slice('/test/paused/'.length)+new URL(c.req.url).search,c.req.raw),{...c.env,ALLOW_NEW_ACCOUNTS:'false',IAP_PURCHASES_ENABLED:'false'},c.executionCtx));app.post('/test/save',async c=>{const b=await c.req.json(),prefs=Object.fromEntries(nativeKeys.map(k=>[k,'0'])),attributes=JSON.stringify({level:1,exp:0,s_top:'',s_glove:'',s_shoes:'',s_weapon:''});Object.assign(prefs,{alaster_attributes:attributes,edna_attributes:attributes,louisa_attributes:'',soul_attributes:'',gamedata:JSON.stringify({gold:0,ruby:0,stageProgress:1,tutorialProgress:0,timeCounter:10,usedCoupons:[],stageInfo:[],stat_goldEarned:0,stat_rubyEarned:0}),inventory:'^^',consumable:'',LastRewardTime:'',selected:'alaster',achievements_new:Array(27).fill('0').join('|'),lbId:'',lbName:''});return c.json(await publishSnapshot(c.env,b.playerId,{game:'ec1',schemaVersion:1,playtime:10,data:{CLOUD_ALL_DATA:JSON.stringify(prefs),Playtime:'10'},expectedSaveVersion:0,operationId:b.operationId,intent:'new_game'}));});app.onError((e,c)=>c.json({error:e.code||'error'},e.status||503));export default app;`;
   const bundled = await build({
     stdin: { contents, resolveDir: process.cwd() },
     bundle: true,
@@ -426,7 +426,7 @@ test("store state, quantity, account provenance and outages fail closed before r
     [
       "revoked-token",
       { purchaseStateContext: { purchaseState: "CANCELLED" } },
-      "invalid_purchase_receipt",
+      "purchase_cancelled",
     ],
     [
       "wrong-owner",
@@ -1001,4 +1001,33 @@ test('native binding advertises only its configured platform catalogue',async()=
  assert.ok(apple.enabledProductIds.includes('iap_premium'));assert.ok(!apple.enabledProductIds.includes('premium'));
  assert.ok(google.enabledProductIds.includes('ruby1')&&apple.enabledProductIds.includes('ruby1'));
  assert.equal((await request('/api/purchases/account-binding?platform=invalid',null,'GET',guestSession.accessToken)).status,400);
+});
+
+
+test('verified Google sandbox purchases opt in only for authenticated allowlisted accounts',async()=>{
+ const input=await modernProof('ruby1','allowlisted-sandbox',player.playerId,binding.googleObfuscatedAccountId);
+ facts.get('allowlisted-sandbox').testPurchaseContext={fopType:'TEST'};
+ const allow='/test/sandbox/'+player.playerId;
+ const granted=await request(allow,input,'POST',player.accessToken);
+ assert.equal(granted.status,200,JSON.stringify(granted));assert.equal(granted.environment,'test');
+ assert.deepEqual(await request(allow,input,'POST',player.accessToken),granted);
+ const foreign=await modernProof('ruby1','unlisted-sandbox',other.playerId,otherBinding.googleObfuscatedAccountId);
+ facts.get('unlisted-sandbox').testPurchaseContext={fopType:'TEST'};
+ assert.equal((await request(allow,foreign,'POST',other.accessToken)).error,'test_purchase_not_allowed');
+ const guest=await modernProof('ruby1','guest-sandbox');facts.get('guest-sandbox').testPurchaseContext={fopType:'TEST'};
+ assert.equal((await request('/test/sandbox/'+guestSession.playerId,guest,'POST',guestSession.accessToken)).error,'test_purchase_not_allowed');
+ assert.equal((await db.prepare('SELECT COUNT(*) n FROM purchase_grant WHERE purchase_key IN (?,?)').bind('google:'+hex('unlisted-sandbox'),'google:'+hex('guest-sandbox')).first()).n,0);
+});
+
+
+test('current Google cancellation has a typed terminal result and never reserves or grants value',async()=>{
+ const input=await modernProof('ruby3','cancelled-modern',player.playerId,binding.googleObfuscatedAccountId);
+ facts.get('cancelled-modern').purchaseStateContext={purchaseState:'CANCELLED'};
+ for(let i=0;i<2;i++){
+  const result=await request('/api/purchases/validate',input,'POST',player.accessToken);
+  assert.equal(result.status,409);assert.equal(result.error,'purchase_cancelled');assert.equal(result.rewards,undefined);
+ }
+ const key='google:'+hex('cancelled-modern');
+ assert.equal((await db.prepare('SELECT COUNT(*) n FROM purchase_ledger WHERE purchase_key=?').bind(key).first()).n,0);
+ assert.equal((await db.prepare('SELECT COUNT(*) n FROM purchase_grant WHERE purchase_key=?').bind(key).first()).n,0);
 });

@@ -9,3 +9,5 @@ Migration `034_editor_purchase_grants.sql` adds immutable-by-contract grant payl
 The client durably applies the response once, then calls `POST /api/purchases/editor-test/:grantId/ack`. Acknowledgement is bound to the authenticated player and original operation. It is repeatable and never republishes a cloud save. Device builds do not process Editor test requests from a copied local purchase journal.
 
 The request has no confirmation popup; explicit sign-in may still use the shared Accounts screen if the player has no session. Network failures retain the same operation and grant for retry. No local simulated-grant fallback remains.
+
+Fresh Editor operations can repeatedly test premium and dual booster after a local `reset0`. Each operation preserves its own immutable grant and ledger row; no server offer reservation or permanent entitlement is created by Editor simulation. Retrying the same operation always returns its original grant. Retired costume purchase products remain excluded from the active storefront.

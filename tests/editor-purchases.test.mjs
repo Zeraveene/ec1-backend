@@ -60,3 +60,15 @@ test('hero and booster catalog grants are marked test and ack is player-bound an
   assert.equal((await db.prepare('SELECT status FROM purchase_ledger WHERE purchase_key=?').bind(r.body.purchaseKey).first()).status,'granted');
  }
 });
+
+test('fresh editor operations repeat permanent purchases without deleting prior paid provenance',async()=>{
+ for(const sku of ['premium','booster_pack']){
+  const one=body(sku,sku+'-before-reset'),two=body(sku,sku+'-after-reset');
+  const a=await req('/editor-test',one),b=await req('/editor-test',two);
+  assert.equal(a.status,200);assert.equal(b.status,200);assert.notEqual(a.body.grantId,b.body.grantId);
+  assert.deepEqual(a.body.entitlements,b.body.entitlements);assert.deepEqual(a,await req('/editor-test',one));
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM purchase_ledger WHERE purchase_key IN (?,?)').bind(a.body.purchaseKey,b.body.purchaseKey).first()).n,2);
+ }
+ assert.equal((await db.prepare('SELECT COUNT(*) n FROM purchase_offer_claim').first()).n,0);
+ assert.equal((await db.prepare('SELECT COUNT(*) n FROM purchase_entitlement').first()).n,0);
+});

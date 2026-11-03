@@ -1,4 +1,6 @@
 import { legacyEditor, legacySaveEdit } from './legacy-edit';
+import { previewMigration, applyMigration } from './migration';
+import { migrationEmailStatus, sendMigrationEmail } from './migration-email';
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -89,6 +91,17 @@ export function createClassicAdminControl() {
     const result = await readWorkspace(c.env, operation, args);
     return c.json(result.body, result.status as ContentfulStatusCode);
   };
+  app.post('/legacy/:id/migrate/preview', async c => { await body(c); return c.json(await previewMigration(c.env, c.get('adminActor'), c.req.param('id'))); });
+  app.post('/legacy/:id/migrate', async c => {
+    const b = await body(c), actor = c.get('adminActor'), result = await applyMigration(c.env, actor, c.req.param('id'), b);
+    if (b.sendEmail === true && result.emailStatus === 'pending') {
+      try { result.emailStatus = (await sendMigrationEmail(c.env, actor, result.playerId)).status; }
+      catch { /* Save and login are committed; expose the durable delivery status. */ }
+    }
+    return c.json(result);
+  });
+  app.get('/legacy/:id/migration-email', async c => { requireWriter(c.get('adminActor')); return c.json(await migrationEmailStatus(c.env, c.req.param('id'))); });
+  app.post('/legacy/:id/migration-email', async c => { await body(c); return c.json(await sendMigrationEmail(c.env, c.get('adminActor'), c.req.param('id'))); });
   app.get("/legacy/:id/editor", async c => c.json(await legacyEditor(c.env,c.get("adminActor"),{id:c.req.param("id")})));
   app.post("/legacy/:id/revisions", async c => { const b=await body(c);return c.json(await legacySaveEdit(c.env,c.get("adminActor"),{...b,id:c.req.param("id")})); });
   app.get("/legacy", c => read(c, "legacy-search", { query: c.req.query("query") }));

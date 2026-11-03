@@ -46,3 +46,26 @@ test('malformed, oversized and path-traversal reports are rejected', async () =>
   for (const body of [null, { runId: '../other', report: {} }, { runId: run.runId, report: [] }, { runId: run.runId, report: { errors: 'x'.repeat(270 * 1024) } }])
     await assert.rejects(() => feature.storeStoryTestReport(env, 'synthetic-developer', body));
 });
+
+test('developer aliases are reusable, normalized, restricted and never mint grants', () => {
+  for (const [code, diagnostic] of [['autorun','full-story'],['reset0','test-save-reset'],['orkay','test-resources']]) {
+    const first = feature.checkStoryTestCode(config(), 'synthetic-developer', ` ${code} `);
+    assert.equal(first.diagnostic, diagnostic); assert.equal(first.claimed, false); assert.equal(first.grant, undefined);
+    assert.deepEqual(feature.checkStoryTestCode(config(), 'synthetic-developer', code.toUpperCase()), first);
+    for (const env of [{}, {...config(), STORY_TEST_ENABLED:'false'}, {...config(), STORY_TEST_PLAYERS:'synthetic-developer-suffix'}])
+      assert.throws(() => feature.checkStoryTestCode(env, 'synthetic-developer', code), e => e.message === 'coupon_unavailable');
+    assert.throws(() => feature.checkStoryTestCode(config(), 'synthetic-other', code));
+  }
+});
+
+test('local test commands issue distinct invocation IDs and cannot start story runs', () => {
+  for (const code of ['reset0','orkay']) {
+    const a=feature.startTestCommand(config(),'synthetic-developer',code), b=feature.startTestCommand(config(),'synthetic-developer',code);
+    assert.match(a.operationId,/^[a-f0-9-]{36}$/); assert.notEqual(a.operationId,b.operationId);
+    assert.equal(a.playerId,'synthetic-developer'); assert.equal(a.grant,undefined);
+    assert.throws(() => feature.startStoryTest(config(),'synthetic-developer',code));
+    assert.throws(() => feature.startTestCommand(config(),'synthetic-other',code));
+  }
+  assert.throws(() => feature.startTestCommand(config(),'synthetic-developer','autorun'));
+  assert.throws(() => feature.startTestCommand(config(),'synthetic-developer','ordinary'));
+});

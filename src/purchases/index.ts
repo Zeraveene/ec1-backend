@@ -61,8 +61,9 @@ async function committedReceipt(
 }
 export function createPurchasesApp() {
   const app = new Hono<AppEnv>();
-  app.onError((error, c) =>
-    error instanceof AuthError ||
+  app.onError((error, c) => {
+    if (error instanceof ReceiptError) console.warn(JSON.stringify({ event: 'purchase_receipt_rejected', reason: error.code }));
+    return error instanceof AuthError ||
     error instanceof GameError ||
     error instanceof PurchaseError
       ? c.json(
@@ -79,8 +80,8 @@ export function createPurchasesApp() {
               { error: "invalid_purchase_receipt", reason: error.code },
               401,
             )
-        : c.json({ error: "purchase_service_unavailable" }, 503),
-  );
+        : c.json({ error: "purchase_service_unavailable" }, 503);
+  });
   installPurchaseIdentity(app);
   app.use("*", async (c, next) => {
     if (c.get("player").scope !== "player")
@@ -195,7 +196,7 @@ export function createPurchasesApp() {
     }
     if (await c.env.DB.prepare("SELECT 1 FROM purchase_grant WHERE purchase_key=?").bind(purchaseKey).first())
       throw new PurchaseError("purchase_delivery_protocol_required",409);
-    const facts = await verifyStore(c.env, verified, binding);
+    const facts = await verifyStore(c.env, verified, binding, c.get("player"));
     try {
       await c.env.DB.prepare(
         "INSERT OR IGNORE INTO purchase_ledger(purchase_key,platform,transaction_id,player_id,product_id,receipt_hash,quantity,environment,verification_source,facts_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",

@@ -594,3 +594,19 @@ test("concurrent creates recover same request and type distinct-operation code c
     "coupon_code_exists",
   );
 });
+
+test('reusable developer command HTTP routes require player auth and publish no grants or saves', async () => {
+  const before = (await db.prepare("SELECT COUNT(*) n FROM liveops_grant").first()).n;
+  for (const code of ['reset0','orkay']) {
+    assert.equal((await request('/coupons/test-command/start',{code},null)).status,401);
+    assert.equal((await request('/coupons/test-command/start',{code},'other')).status,404);
+    const migration = await mf.dispatchFetch('https://synthetic.local/coupons/test-command/start',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token('owner','migration')}`},body:JSON.stringify({code})});
+    assert.equal(migration.status,403);
+    const a=await request('/coupons/test-command/start',{code}), b=await request('/coupons/test-command/start',{code});
+    assert.equal(a.status,200); assert.equal(b.status,200); assert.notEqual(a.body.operationId,b.body.operationId);
+    assert.equal(a.body.playerId,'owner'); assert.equal(a.body.grant,undefined);
+    assert.equal((await request('/coupons/claim',{code})).status,404);
+  }
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM liveops_grant").first()).n,before);
+  assert.equal((await db.prepare("SELECT save_version FROM player WHERE id='owner'").first()).save_version,0);
+});

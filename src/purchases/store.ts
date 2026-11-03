@@ -95,10 +95,16 @@ export interface StoreFacts {
   orderId: string;
   accountBinding: string;
 }
+// The identity comes only from authenticated route context, never receipt/request fields.
+export function testPurchasesAllowed(env: Env, player?: { playerId: string; provider: string }) {
+  return env.IAP_ALLOW_TEST_PURCHASES === "true" || !!(player && player.provider !== 'purchase_guest' &&
+    (env.IAP_TEST_PURCHASE_PLAYERS ?? '').split(',').map(id => id.trim()).filter(Boolean).includes(player.playerId));
+}
 export async function verifyStore(
   env: Env,
   verified: VerifiedPurchase,
   account: { google_account_id: string; apple_account_token: string },
+  player?: { playerId: string; provider: string },
 ): Promise<StoreFacts> {
   if (verified.platform === "apple") {
     if (env.IAP_APPLE_VERIFICATION_MODE !== "receipt")
@@ -118,7 +124,7 @@ export async function verifyStore(
       throw new PurchaseError("purchase_quantity_unsupported", 422);
     if (
       data.environment === "Sandbox" &&
-      env.IAP_ALLOW_TEST_PURCHASES !== "true"
+      !testPurchasesAllowed(env, player)
     )
       throw new PurchaseError("test_purchase_not_allowed", 403);
     return {
@@ -161,8 +167,12 @@ export async function verifyStore(
   }
   if (result.purchaseStateContext?.purchaseState === "PENDING")
     throw new PurchaseError("purchase_pending", 409);
-  if (result.purchaseStateContext?.purchaseState !== "PURCHASED")
+  if (result.purchaseStateContext?.purchaseState !== "PURCHASED") {
+    const state = result.purchaseStateContext?.purchaseState;
+    console.warn(JSON.stringify({ event: 'purchase_store_state_rejected', state: ['CANCELLED','PURCHASE_STATE_UNSPECIFIED'].includes(state) ? state : 'unknown' }));
+    if (state === 'CANCELLED') throw new PurchaseError('purchase_cancelled', 409);
     throw new ReceiptError("not_purchased");
+  }
   if (
     !Array.isArray(result.productLineItem) ||
     result.productLineItem.length !== 1 ||
@@ -175,7 +185,7 @@ export async function verifyStore(
     throw new PurchaseError("purchase_owner_mismatch", 403);
   if (
     result.testPurchaseContext != null &&
-    env.IAP_ALLOW_TEST_PURCHASES !== "true"
+    !testPurchasesAllowed(env, player)
   )
     throw new PurchaseError("test_purchase_not_allowed", 403);
   if (

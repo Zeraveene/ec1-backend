@@ -71,7 +71,7 @@ export function installGrantRoutes(app: Hono<AppEnv>) {
     if (mode==='purchase' && !activeProducts.includes(productId)) throw new PurchaseError('purchase_product_unsupported',422);
     if (mode==='restore' && Object.keys(definition.entitlements).length===0) throw new PurchaseError('purchase_not_restorable',422);
     // A paused checkout must still recover valid payments that were already made.
-    const facts = await verifyStore(c.env,verified,await accountBinding(c.env,playerId));
+    const facts = await verifyStore(c.env,verified,await accountBinding(c.env,playerId),c.get("player"));
     const grantId='purchase_' + await hex(`${purchaseKey}/${mode}`), now=Date.now();
     const grant={protocol,game:'ec1',playerId,grantId,purchaseKey,platform,productId,quantity:1,rewardRevision:'catalog-v1',
       environment:facts.environment,verificationSource:facts.source,

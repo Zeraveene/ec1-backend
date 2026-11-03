@@ -9,14 +9,25 @@ export function storyTestEnabledFor(env: Env, playerId: string): boolean {
 
 export function checkStoryTestCode(env: Env, playerId: string, supplied: unknown) {
   const configured = (env.STORY_TEST_COUPON ?? '').trim().toUpperCase();
-  if (!configured || typeof supplied !== 'string' || supplied.trim().toUpperCase() !== configured) return null;
+  if (typeof supplied !== 'string') return null;
+  const normalized = supplied.trim().toUpperCase();
+  const diagnostic = normalized === 'AUTORUN' || (configured && normalized === configured) ? 'full-story'
+    : normalized === 'RESET0' ? 'test-save-reset' : normalized === 'ORKAY' ? 'test-resources' : null;
+  if (!diagnostic) return null;
   if (!storyTestEnabledFor(env, playerId)) throw new GameError('coupon_unavailable', 404);
-  return { eligible: true, claimed: false, diagnostic: 'full-story', playerId };
+  return { eligible: true, claimed: false, diagnostic, playerId };
 }
 
 export function startStoryTest(env: Env, playerId: string, supplied: unknown) {
-  if (!checkStoryTestCode(env, playerId, supplied)) throw new GameError('coupon_unavailable', 404);
+  if (checkStoryTestCode(env, playerId, supplied)?.diagnostic !== 'full-story') throw new GameError('coupon_unavailable', 404);
   return { diagnostic: 'full-story', playerId, runId: crypto.randomUUID(), speed: 20 };
+}
+
+// Explicit developer invocation: no reward ledger, backup publication or paid-provenance mutation.
+export function startTestCommand(env: Env, playerId: string, supplied: unknown) {
+  const command = checkStoryTestCode(env, playerId, supplied);
+  if (!command || command.diagnostic === 'full-story') throw new GameError('coupon_unavailable', 404);
+  return { diagnostic: command.diagnostic, playerId, operationId: crypto.randomUUID() };
 }
 
 export async function storeStoryTestReport(env: Env, playerId: string, supplied: unknown) {
