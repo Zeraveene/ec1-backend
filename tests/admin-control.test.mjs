@@ -81,7 +81,11 @@ test('origin, JSON, size and current role protect every action',async()=>{
   for(const role of ['manager','guest']){
     await mode(role);assert.equal((await request('/capabilities')).body.canWrite,false);
     assert.equal((await request('/players/destination/revisions')).status,200);
+    const saveView=await request('/players/destination/save-view');assert.equal(saveView.status,200);assert.equal(saveView.body.account.gold,20);assert.equal(saveView.cache,'no-store');assert.doesNotMatch(JSON.stringify(saveView.body),/password_hash|r2_key/);
     assert.equal((await request('/players/destination/revisions/1')).status,403);
+    assert.equal((await request('/players/destination/deletion')).status,403);
+    assert.equal((await request('/players/destination/delete',{method:'POST',body:{confirmation:'destination',acknowledged:true,reason:'Fixture request',operationId:'blocked-deletion'}})).status,403);
+    assert.equal((await request('/players/destination/purchases')).status,403);
     assert.equal((await request(path,{method:'POST',body,headers:{'X-Admin-Role':'internal'}})).status,403);
   }
   await mode('internal');
@@ -115,7 +119,7 @@ test('revision preview/download and confirmed restore work through the direct EC
 });
 
 test('direct workspace reads use current central session without RPC, redact storage and scope cursors',async()=>{
-  for(const path of ['/status','/players','/players/source','/audit']) {
+  for(const path of ['/status','/players','/players/source','/players/source/save-view','/players/source/deletion','/players/source/purchases','/audit']) {
     assert.equal((await request(path,{cookie:'',headers:{'X-Admin-Id':'111111111111111111','X-Admin-Role':'internal'}})).status,401);
     await mode('unauthorized');assert.equal((await request(path)).status,401);
     await mode('malformed');assert.equal((await request(path)).status,503);

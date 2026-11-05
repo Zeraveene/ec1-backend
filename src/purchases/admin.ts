@@ -21,6 +21,22 @@ export async function dispatchPurchaseAdmin(env: Env, _actor: { id: string; name
   if (role !== 'internal') return fail(403, 'forbidden');
   const readiness = { ...baseReadiness, purchasesEnabled: configuredProducts(env).length > 0 };
   if (!args || typeof args !== 'object' || Array.isArray(args)) return fail(400, 'invalid_arguments');
+  if (operation === 'purchases.player') {
+    if (!keys(args, ['id', 'cursor']) || typeof args.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(args.id) || args.cursor !== undefined && (typeof args.cursor !== 'string' || args.cursor.length > 800)) return fail(400, 'invalid_arguments');
+    let before = Number.MAX_SAFE_INTEGER;
+    if (args.cursor) {
+      try { const value = JSON.parse(atob(args.cursor as string)); if (value.id !== args.id || !Number.isSafeInteger(value.before) || value.before < 1) throw Error(); before = value.before; }
+      catch { return fail(400, 'invalid_cursor'); }
+    }
+    try {
+      const [count, rows] = await env.DB.batch<Record<string, unknown>>([
+        env.DB.prepare('SELECT COUNT(*) AS total FROM purchase_ledger WHERE player_id=?').bind(args.id),
+        env.DB.prepare(`SELECT ${projection} ${from} WHERE p.player_id=? AND p.rowid<? ORDER BY p.rowid DESC LIMIT 51`).bind(args.id, before),
+      ]);
+      const visible = rows.results.slice(0, 50), last = visible.at(-1);
+      return { status: 200, body: { total: count.results[0].total, purchases: visible.map(rowDto), nextCursor: rows.results.length > 50 && last ? btoa(JSON.stringify({ id: args.id, before: last.rowId })) : null } };
+    } catch { return fail(503, 'purchase_storage_unavailable'); }
+  }
   if (operation === 'purchases.detail') {
     if (!keys(args, ['id']) || typeof args.id !== 'string' || !/^p_[1-9a-z][0-9a-z]{0,10}$/.test(args.id)) return fail(400, 'invalid_arguments');
     const id = parseInt(args.id.slice(2), 36);

@@ -33,7 +33,7 @@ before(async () => {
         assert.equal(new URL(request.url).hostname, 'synthetic.playfabapi.com');
         if (id === 'AAAABBBB0009') return new Response('unavailable', { status: 503 });
         if (method === '/Admin/GetUserAccountInfo') return Response.json({ data: { UserInfo: { PlayFabId: id, TitleInfo: { DisplayName: 'Fixture player' }, PrivateInfo: { Email: id.toLowerCase() + '@fixture.invalid' }, ...(id.endsWith('0002') ? { GoogleInfo: { GoogleId: 'google-' + id, GoogleEmail: 'google@fixture.invalid' } } : {}) } } });
-        if (method === '/Admin/GetUserData') return Response.json({ data: { Data: Object.fromEntries(Object.entries(legacy(id, id.endsWith('0008') ? { gamedata: '{"gold":-1,"ruby":0}' } : {})).map(([k, Value]) => [k, { Value }])) } });
+        if (method === '/Admin/GetUserData') return Response.json({ data: { Data: Object.fromEntries(Object.entries(legacy(id, id.endsWith('0008') ? { gamedata: '{"gold":-1,"ruby":0}' } : id.endsWith('0011') ? { dailyBoosterQuota: '-1090', entry_chaos: '-1' } : {})).map(([k, Value]) => [k, { Value }])) } });
         if (method === '/Admin/GetUserInventory') return Response.json({ data: { Inventory: id.endsWith('0007') ? [{ ItemId: 'unknown' }] : [], VirtualCurrency: {}, RechargeTimes: { random: Math.random() } } });
         if (method === '/Admin/GetUserBans') return Response.json({ data: { BanData: id.endsWith('0002') ? [{ BanId: 'ban-1', Active: true, PlayFabId: id }] : [] } });
         throw Error('PlayFab writes and unapproved network are forbidden: ' + method);
@@ -64,6 +64,36 @@ test('legacy conversion preserves progression, equipment, flags, quoted delimite
   const slots = await convert(JSON.stringify({ ...values, consumable: JSON.stringify({ stringA: '{"id":"potion","amount":2}', stringB: '', amountA: 2, amountB: 20, slotA: 456 }) })); assert.equal(slots.status, 200); assert.equal(JSON.parse(slots.body.json).consumableSlots.amountB, 0);
   assert.equal((await convert(converted.body.json)).status, 200);
   for (const raw of ['{}', '{"gamedata":"{\\"gold\\":-1,\\"ruby\\":0}"}', JSON.stringify({ ...values, premium: '2' }), JSON.stringify({ ...values, alaster_attributes: '{"level":"23","exp":0}' })]) assert.equal((await convert(raw)).status, 409);
+});
+test('legacy exhausted daily allowances normalize without changing progress or awarding charges', async () => {
+  const input = legacy('fixture', { dailyBoosterQuota: '-1090', entry_treasure: '-2', entry_march: '3', entry_chaos: '-1' });
+  const original = input.CLOUD_ALL_DATA;
+  const converted = await convert(original, input.Playtime); assert.equal(converted.status, 200, JSON.stringify(converted));
+  const save = JSON.parse(converted.body.json);
+  assert.deepEqual([save.daily.boosterQuota, save.daily.treasureEntries, save.daily.marchEntries, save.daily.chaosEntries], [0, 0, 3, 0]);
+  assert.equal(save.daily.boosterActivated, true);
+  assert.deepEqual(converted.body.normalizations, [{ field: 'boosterQuota', from: -1090, to: 0 }, { field: 'treasureEntries', from: -2, to: 0 }, { field: 'chaosEntries', from: -1, to: 0 }]);
+  const baseline = JSON.parse((await convert(legacy('fixture').CLOUD_ALL_DATA, input.Playtime)).body.json);
+  delete save.daily; delete baseline.daily; assert.deepEqual(save, baseline, 'currency, progression, heroes, equipment, inventory and ownership are preserved');
+  assert.equal(input.CLOUD_ALL_DATA, original);
+  const values = JSON.parse(original), positional = keys.map(key => values[key] ?? '').join('$');
+  const historical = await convert(positional); assert.equal(historical.status, 200); assert.equal(JSON.parse(historical.body.json).daily.chaosEntries, 0);
+  for (const [value, activated, quota] of [[undefined, false, 0], ['-1', false, 0], ['0', true, 0], ['2', true, 2]]) {
+    const extra = value === undefined ? {} : { dailyBoosterQuota: value };
+    const output = await convert(legacy('fixture', extra).CLOUD_ALL_DATA); assert.equal(output.status, 200);
+    const result = JSON.parse(output.body.json); assert.equal(result.daily.boosterActivated, activated); assert.equal(result.daily.boosterQuota, quota);
+    if (value === undefined) assert.deepEqual(output.body.normalizations, []);
+  }
+});
+test('daily repair is legacy-only and never accepts malformed counters or unrelated negative state', async () => {
+  for (const extra of [{ dailyBoosterQuota: 'not-a-number' }, { dailyBoosterQuota: '-1.5' }, { dailyBoosterQuota: '-2147483649' }, { entry_chaos: '-1x' }, { LastReward: '-1' }, { buff_exp_end: '-1' }, { gamedata: '{"gold":-1,"ruby":0}' }]) {
+    assert.equal((await convert(legacy('fixture', extra).CLOUD_ALL_DATA)).status, 409);
+  }
+  const healthy = JSON.parse((await convert(legacy('fixture').CLOUD_ALL_DATA)).body.json);
+  for (const key of ['boosterQuota', 'treasureEntries', 'marchEntries', 'chaosEntries']) {
+    const canonical = structuredClone(healthy); canonical.daily[key] = -1;
+    assert.equal((await convert(JSON.stringify(canonical))).status, 409, key);
+  }
 });
 test('preview requires internal central session and origin; no target player or credentials are created', async () => {
   const id = 'AAAABBBB0001'; const before = outboundCalls;
@@ -139,4 +169,20 @@ test('latest backend legacy edit is migrated; untouched PlayFab bytes and edit p
   assert.equal(JSON.parse(JSON.parse(archive.userData.Data.CLOUD_ALL_DATA.Value).gamedata).gold, 777);
   assert.equal(archive.backendRevision.revision, 1);
   assert.equal((await mf.dispatchFetch(origin + '/verify/' + id, { method: 'POST' })).status, 200);
+});
+
+test('reviewed migration records allowance repairs while preserving archived original counters', async () => {
+  const id = 'AAAABBBB0011', review = await preview(id);
+  assert.deepEqual(review.normalizations, [{ field: 'boosterQuota', from: -1090, to: 0 }, { field: 'chaosEntries', from: -1, to: 0 }]);
+  const result = await apply(id, review); assert.equal(result.status, 200, JSON.stringify(result));
+  const provenance = await db.prepare('SELECT archive_key FROM classic_migration WHERE player_id=?').bind(id).first();
+  const archived = JSON.parse(await (await (await mf.getR2Bucket('LEGACY_ARCHIVE', 'classic')).get(provenance.archive_key)).text());
+  const original = JSON.parse(archived.originalUserData.Data.CLOUD_ALL_DATA.Value);
+  assert.equal(original.dailyBoosterQuota, '-1090'); assert.equal(original.entry_chaos, '-1');
+  const row = await db.prepare('SELECT r2_key FROM classic_backup_revision WHERE player_id=? AND revision=1').bind(id).first();
+  const save = JSON.parse(await (await (await mf.getR2Bucket('PLAYER_SAVES', 'classic')).get(row.r2_key)).text());
+  assert.equal(save.daily.boosterQuota, 0); assert.equal(save.daily.chaosEntries, 0);
+  assert.equal(save.progress.gold, 123); assert.equal(save.progress.ruby, 7); assert.equal(save.characters[0].level, 23);
+  const audit = await db.prepare("SELECT detail_json FROM admin_audit WHERE player_id=? AND action='legacy.migrate'").bind(id).first();
+  assert.deepEqual(JSON.parse(audit.detail_json).normalizations, review.normalizations);
 });

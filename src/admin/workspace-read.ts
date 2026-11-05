@@ -43,12 +43,12 @@ export async function readWorkspace(env: Env, operation: Operation, args: Record
     try {
       const db = env.DB;
       if (operation === "status") {
-        const count = await db.prepare("SELECT count(*) AS total FROM player").first<{ total: number }>();
+        const count = await db.prepare("SELECT count(*) AS total FROM player WHERE save_state!='deleted'").first<{ total: number }>();
         if (!count) throw new Error("storage");
         return { status: 200, body: { game: "ec1", environment: env.ENVIRONMENT ?? "local", players: count.total, migrationEnabled: env.LEGACY_MIGRATION_ENABLED === "true", newAccountsEnabled: env.ALLOW_NEW_ACCOUNTS === "true", purchasesEnabled: env.IAP_PURCHASES_ENABLED === "true", manualBackupsEnabled: env.EC1_MANUAL_BACKUPS_ENABLED === "true", recoveryEnabled: env.RECOVERY_ENABLED === "true" } };
       }
       if (operation === "player") {
-        const player = await db.prepare(`SELECT ${fields} FROM player WHERE id=?`).bind(args.id).first();
+        const player = await db.prepare(`SELECT ${fields} FROM player WHERE id=? AND save_state!='deleted'`).bind(args.id).first();
         if (!player) return fail(404, "player_not_found");
         const [identities, revisions, mail] = await Promise.all([
           db.prepare("SELECT provider,subject,created_at FROM auth_identity WHERE player_id=? ORDER BY provider LIMIT 100").bind(args.id).all(),
@@ -61,7 +61,7 @@ export async function readWorkspace(env: Env, operation: Operation, args: Record
         return { status: 200, body: { player, canonicalBackups: {format:"canonical",headRevision:canonicalHead?.revision ?? 0,revisions:canonicalRevisions}, identities: identities.results, revisions: revisions.results, mail: mail.results } };
       }
       const isPlayers = operation === "players", time = isPlayers ? "updated_at" : "created_at";
-      const conditions: string[] = [], bindings: (string | number)[] = [];
+      const conditions: string[] = isPlayers ? ["save_state!='deleted'"] : [], bindings: (string | number)[] = [];
       if (isPlayers && query) { conditions.push("(instr(id,?)>0 OR instr(COALESCE(display_name,''),?)>0)"); bindings.push(query, query); }
       if (after) { conditions.push(`(${time}<? OR (${time}=? AND id<?))`); bindings.push(after.time, after.time, after.id); }
       const result = await db.prepare(`SELECT ${isPlayers ? fields : "id,actor_id,actor_name,action,player_id,created_at"} FROM ${isPlayers ? "player" : "admin_audit"}${conditions.length ? " WHERE " + conditions.join(" AND ") : ""} ORDER BY ${time} DESC,id DESC LIMIT 101`).bind(...bindings).all();

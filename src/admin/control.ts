@@ -1,3 +1,5 @@
+import { accountDeletionAvailable, accountDeletionStatus, deleteAccount } from './account-deletion';
+import { playerSaveView } from './player-save-view';
 import { legacyEditor, legacySaveEdit } from './legacy-edit';
 import { previewMigration, applyMigration } from './migration';
 import { migrationEmailStatus, sendMigrationEmail } from './migration-email';
@@ -109,6 +111,10 @@ export function createClassicAdminControl() {
   app.get("/status", c => read(c, "status"));
   app.get("/players", c => read(c, "players", { query: c.req.query("query"), cursor: c.req.query("cursor") }));
   app.get("/players/:id", c => read(c, "player", { id: c.req.param("id") }));
+  app.get("/players/:id/save-view", async c => c.json(await playerSaveView(c.env, c.req.param("id"))));
+  app.get('/players/:id/deletion', async c => c.json(await accountDeletionStatus(c.env, c.get('adminActor'), c.req.param('id'))));
+  app.post('/players/:id/delete', async c => { const b = await body(c); return c.json(await deleteAccount(c.env, c.get('adminActor'), c.req.param('id'), b)); });
+  app.get('/players/:id/purchases', async c => { const result = await dispatchPurchaseAdmin(c.env, c.get('adminActor'), c.get('adminActor').role, 'purchases.player', { id: c.req.param('id'), cursor: c.req.query('cursor') }); return c.json(result.body, result.status as ContentfulStatusCode); });
   app.get("/audit", c => read(c, "audit", { cursor: c.req.query("cursor") }));
   app.get('/purchases/catalog', c => {
     requireWriter(c.get('adminActor'));
@@ -143,8 +149,8 @@ export function createClassicAdminControl() {
     const result = await dispatchLiveopsAdmin(c.env, actor, actor.role, c.req.param('feature'), c.req.param('action'), args, true);
     return c.json(result.body, result.status as ContentfulStatusCode);
   });
-  app.get("/capabilities", c => c.json({ game: "ec1", role: c.get("adminActor").role,
-    canWrite: c.get("adminActor").role === "internal", canManageLiveOps: c.get("adminActor").role !== "guest", features: { identities: true, revisions: true, canonicalRevisions: true, liveops: true } }));
+  app.get("/capabilities", async c => c.json({ game: "ec1", role: c.get("adminActor").role,
+    canWrite: c.get("adminActor").role === "internal", canManageLiveOps: c.get("adminActor").role !== "guest", features: { identities: true, revisions: true, canonicalRevisions: true, liveops: true, accountDeletion: await accountDeletionAvailable(c.env) } }));
   app.get("/players/:id/identities", async c => c.json(await identityRead(c.env, c.get("adminActor"), { id: c.req.param("id") })));
   app.post("/players/:id/identities/:provider/move/preview", async c => {
     const b = await body(c);

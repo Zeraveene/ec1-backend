@@ -104,7 +104,7 @@ export function convertLegacyCloud(raw: string, companion?: string) {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 2_000_000) fail();
     const parts = split(raw, '$');
     const root = parts.length === 1 && raw.trimStart().startsWith('{') ? object(raw) : null;
-    if (root?.schemaVersion !== undefined) { if (root.appliedPurchaseGrants === undefined) root.appliedPurchaseGrants = []; return valid(root); }
+    if (root?.schemaVersion !== undefined) { if (root.appliedPurchaseGrants === undefined) root.appliedPurchaseGrants = []; return { ...valid(root), normalizations: [] as { field: string; from: number; to: number }[] }; }
     const values: Record<string, string> = root ?? (parts.length >= 3 && parts.length <= keys.length ? Object.fromEntries(parts.map((v, i) => [keys[i], v])) : fail());
     if (Object.values(values).some(v => typeof v !== 'string')) fail();
     const text = (k: string, fallback = '') => values[k] || fallback;
@@ -135,10 +135,22 @@ export function convertLegacyCloud(raw: string, companion?: string) {
       save.consumableSlots = hydrate(slots, 'ConsumableSlotsSaveRecord');
       for (const k of ['A', 'B']) { if (save.consumableSlots['slot' + k]) save.consumableSlots['slot' + k] = item(save.consumableSlots['slot' + k], false); else save.consumableSlots['amount' + k] = 0; }
     }
-    const dailyKeys: Record<string, string> = { lastReward: 'LastReward', dailyReset: 'dailyReset', allClaimed: 'task_all_claimed', boosterQuota: 'dailyBoosterQuota', treasureEntries: 'entry_treasure', marchEntries: 'entry_march', chaosEntries: 'entry_chaos' };
+    const dailyKeys: Record<string, string> = { lastReward: 'LastReward', dailyReset: 'dailyReset', allClaimed: 'task_all_claimed', treasureEntries: 'entry_treasure', marchEntries: 'entry_march', chaosEntries: 'entry_chaos' };
     for (const [k, pref] of Object.entries(dailyKeys)) save.daily[k] = integer(pref);
+    // Historical counters can underflow after their allowances are exhausted.
+    // Preserve exhaustion without granting new attempts. Only legacy preference
+    // conversion repairs these counters; canonical snapshots remain strict.
+    const quota = integer('dailyBoosterQuota', -1);
+    save.daily.boosterQuota = quota;
+    const normalizations: { field: string; from: number; to: number }[] = [];
+    for (const field of ['boosterQuota', 'treasureEntries', 'marchEntries', 'chaosEntries']) {
+      if (save.daily[field] < 0) {
+        if (field !== 'boosterQuota' || text('dailyBoosterQuota').trim()) normalizations.push({ field, from: save.daily[field], to: 0 });
+        save.daily[field] = 0;
+      }
+    }
     save.daily.lastRewardTime = text('LastRewardTime'); save.daily.timedRewardsTime = text('TimedRewardsTime');
-    save.daily.questsAssigned = !!text('task0'); save.daily.boosterActivated = !!text('dailyBoosterQuota');
+    save.daily.questsAssigned = !!text('task0'); save.daily.boosterActivated = quota !== -1;
     save.daily.quests = [0, 1, 2].map(i => ({ assignment: integer('task' + i, i), progress: integer('task' + i + '_progress'), claimed: integer('task' + i + '_claimed') }));
     save.daily.experienceBuffEnd = number('buff_exp_end'); save.daily.lootBuffEnd = number('buff_loot_end');
     save.unlocks.selectedCharacter = text('selected', 'alaster'); save.unlocks.selectedPet = text('selectedPet');
@@ -161,6 +173,6 @@ export function convertLegacyCloud(raw: string, companion?: string) {
     for (const k of preferences) save.preferences.integers[k] = integer(k, ['usesound', 'usebgm', 'fixedpad', 'autotarget', 'overrideMovement'].includes(k) ? 1 : 0);
     if (text('ec1_applied_purchase_grants')) save.appliedPurchaseGrants = JSON.parse(text('ec1_applied_purchase_grants'));
     if (text('ec1_save_ownership')) save.ownership = object(text('ec1_save_ownership'));
-    return valid(save);
+    return { ...valid(save), normalizations };
   } catch { return fail(); }
 }

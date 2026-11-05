@@ -1,9 +1,10 @@
+import { summarizeRevisions, saveSummary } from './save-summary';
 import { canonicalRevisionList,canonicalRevisionGet,canonicalRevisionPreview,canonicalRevisionRestore } from './canonical-revisions';
 import type { Env } from '../env';
 import { AdminActionError, requireWriter, type AdminActor } from './action-types';
 import { publishSnapshot } from '../game/storage';
 import { sha256, stableJson, validateSnapshot, type Snapshot } from '../game/validation';
-interface Row {
+export interface Row {
     version: number;
     sha256: string;
     playtime: number;
@@ -23,7 +24,7 @@ async function player(env: Env, playerId: string) { const p = await env.DB.prepa
     throw new AdminActionError('player_not_found', 404); return p; }
 async function revision(env: Env, playerId: string, version: number) { const r = await env.DB.prepare('SELECT * FROM save_revision WHERE player_id=? AND version=?').bind(playerId, version).first<Row>(); if (!r)
     throw new AdminActionError('revision_not_found', 404); return r; }
-async function verified(env: Env, row: Row): Promise<{
+export async function verifiedLegacyRevision(env: Env, row: Row): Promise<{
     snapshot: Snapshot;
     content: string;
 }> {
@@ -65,7 +66,11 @@ export async function revisionList(env: Env, _actor: AdminActor, args: Record<st
     }
     const rows = await env.DB.prepare('SELECT * FROM save_revision WHERE player_id=? AND version<? ORDER BY version DESC LIMIT 101').bind(playerId, before).all<Row>();
     const shown = rows.results.slice(0, 100);
-    return { playerId, revisions: shown.map(metadata), nextCursor: rows.results.length > 100 ? btoa(encodeURIComponent(JSON.stringify({ id: playerId, before: shown.at(-1)!.version }))) : null };
+    const summaries = await summarizeRevisions(shown, async row => {
+        const { snapshot } = await verifiedLegacyRevision(env, row);
+        return { payload: snapshot.data.CLOUD_ALL_DATA, playtime: row.playtime };
+    });
+    return { playerId, revisions: shown.map((row, index) => ({ ...metadata(row), summary: summaries[index] })), nextCursor: rows.results.length > 100 ? btoa(encodeURIComponent(JSON.stringify({ id: playerId, before: shown.at(-1)!.version }))) : null };
 }
 export async function revisionGet(env: Env, actor: AdminActor, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if(args.format === 'canonical') return canonicalRevisionGet(env, actor, args);
@@ -74,7 +79,7 @@ export async function revisionGet(env: Env, actor: AdminActor, args: Record<stri
     const playerId = id(args);
     await player(env, playerId);
     const row = await revision(env, playerId, integer(args.version));
-    const { snapshot, content } = await verified(env, row);
+    const { snapshot, content } = await verifiedLegacyRevision(env, row);
     return { playerId, revision: metadata(row), snapshot, download: { filename: `classic-revision-${row.version}.json`, contentType: 'application/json', content } };
 }
 export async function revisionPreviewRestore(env: Env, actor: AdminActor, args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -83,11 +88,13 @@ export async function revisionPreviewRestore(env: Env, actor: AdminActor, args: 
     requireWriter(actor);
     const playerId = id(args), sourceVersion = integer(args.version), p = await player(env, playerId);
     const source = await revision(env, playerId, sourceVersion);
-    await verified(env, source);
+    const sourceSnapshot = await verifiedLegacyRevision(env, source);
+    let currentSummary;
     let currentHash: string | null = null;
     if (p.save_version) {
         const current = await revision(env, playerId, p.save_version).catch(() => { throw new AdminActionError('revision_integrity_unavailable', 503); });
-        await verified(env, current);
+        const currentSnapshot = await verifiedLegacyRevision(env, current);
+        currentSummary = saveSummary(currentSnapshot.snapshot.data.CLOUD_ALL_DATA, current.playtime);
         if (current.playtime !== p.playtime)
             throw new AdminActionError('revision_integrity_unavailable', 503);
         currentHash = current.sha256;
@@ -95,7 +102,7 @@ export async function revisionPreviewRestore(env: Env, actor: AdminActor, args: 
     else if (p.playtime !== 0)
         throw new AdminActionError('revision_integrity_unavailable', 503);
     const reviewSha256 = await sha256(stableJson({ actorId: actor.id, playerId, currentVersion: p.save_version, currentSha256: currentHash, sourceVersion, sourceSha256: source.sha256 }));
-    return { playerId, currentVersion: p.save_version, sourceVersion, reviewSha256, current: { version: p.save_version, playtime: p.playtime, sha256: currentHash }, source: { version: sourceVersion, playtime: source.playtime, sha256: source.sha256 }, warning: source.playtime < p.playtime };
+    return { playerId, currentVersion: p.save_version, sourceVersion, reviewSha256, current: { version: p.save_version, playtime: p.playtime, sha256: currentHash, summary: currentSummary }, source: { version: sourceVersion, playtime: source.playtime, sha256: source.sha256, summary: saveSummary(sourceSnapshot.snapshot.data.CLOUD_ALL_DATA, source.playtime) }, warning: source.playtime < p.playtime };
 }
 export async function revisionRestore(env: Env, actor: AdminActor, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if(args.format === 'canonical') return canonicalRevisionRestore(env, actor, args);
@@ -122,7 +129,7 @@ export async function revisionRestore(env: Env, actor: AdminActor, args: Record<
     const preview = await revisionPreviewRestore(env, actor, args);
     if (preview.currentVersion !== expectedSaveVersion || preview.reviewSha256 !== args.reviewSha256)
         throw new AdminActionError('save_conflict', 409);
-    const { snapshot } = await verified(env, await revision(env, playerId, sourceVersion));
+    const { snapshot } = await verifiedLegacyRevision(env, await revision(env, playerId, sourceVersion));
     const saved = await publishSnapshot(env, playerId, { ...snapshot, expectedSaveVersion, operationId: args.operationId }, { legacy: true, allowPlaytimeDecrease: true, preserveSourceData: true, adminAudit: { id: auditId, actorId: actor.id, actorName: actor.name, action: 'save.restore', detail } });
     return result(saved.saveVersion, saved.playtime);
 }

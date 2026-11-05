@@ -87,7 +87,7 @@ async function source(env: Env, actor: AdminActor, id: string) {
 }
 export async function previewMigration(env: Env, actor: AdminActor, value: unknown) {
   requireWriter(actor); const id = playerId(value), s = await source(env, actor, id);
-  return { id, displayName: s.displayName, playtime: s.snapshot.playtime, sourceRevision: s.sourceRevision, reviewSha256: s.reviewSha256, email: s.email, googleLinked: s.links.some(i => i.provider === 'google') || s.native.some(i => i.provider === 'google'), conflicts: s.conflicts, activeBanCount: s.active.length, existingLogins: s.native.map(i => i.provider), passwordEmail: s.links.some(i => i.provider === 'email') };
+  return { id, displayName: s.displayName, playtime: s.snapshot.playtime, sourceRevision: s.sourceRevision, reviewSha256: s.reviewSha256, email: s.email, googleLinked: s.links.some(i => i.provider === 'google') || s.native.some(i => i.provider === 'google'), conflicts: s.conflicts, activeBanCount: s.active.length, existingLogins: s.native.map(i => i.provider), passwordEmail: s.links.some(i => i.provider === 'email'), normalizations: s.snapshot.normalizations };
 }
 export async function applyMigration(env: Env, actor: AdminActor, value: unknown, args: Record<string, unknown>) {
   requireWriter(actor); const id = playerId(value);
@@ -124,7 +124,7 @@ export async function applyMigration(env: Env, actor: AdminActor, value: unknown
   }
   statements.push(
     env.DB.prepare("UPDATE auth_session SET revoked_at=? WHERE player_id=? AND scope='migration' AND revoked_at IS NULL").bind(seconds, id),
-    env.DB.prepare("INSERT INTO admin_audit(id,actor_id,actor_name,action,player_id,detail_json,created_at) VALUES(?,?,?,'legacy.migrate',?,?,?)").bind('classic-migration:' + operation, actor.id, actor.name, id, stableJson({ operation, revision: 1, sourceRevision: s.sourceRevision, archiveHash: s.archiveHash, reviewSha256: review, loginStatus: response.loginStatus, activeBans: s.active.length }), time),
+    env.DB.prepare("INSERT INTO admin_audit(id,actor_id,actor_name,action,player_id,detail_json,created_at) VALUES(?,?,?,'legacy.migrate',?,?,?)").bind('classic-migration:' + operation, actor.id, actor.name, id, stableJson({ operation, revision: 1, sourceRevision: s.sourceRevision, archiveHash: s.archiveHash, reviewSha256: review, loginStatus: response.loginStatus, activeBans: s.active.length, normalizations: s.snapshot.normalizations }), time),
     env.DB.prepare('INSERT INTO admin_classic_migration(operation_id,player_id,actor_id,review_sha256,response_json,created_at) VALUES(?,?,?,?,?,?)').bind(operation, id, actor.id, review, JSON.stringify(response), time),
     env.DB.prepare('DELETE FROM admin_identity_guard WHERE operation_id=?').bind(operation),
   );

@@ -60,6 +60,22 @@ test('readiness reflects modern grant checkout readiness without exposing privat
   const res=await call('purchases.analytics',{},'internal',{...flags,IAP_GOOGLE_SERVICE_ACCOUNT:'private-credential'});assert.equal(res.body.readiness.purchasesEnabled,enabled);assert.equal(res.body.readiness.deliveryProtocolReady,true);assert.doesNotMatch(JSON.stringify(res),/private-credential|IAP_GOOGLE_SERVICE_ACCOUNT/);
  }
 });
+test('player purchase history is exact, all-time, role-gated and cursor-bound', async () => {
+  const history = await call('purchases.player', { id: 'synthetic' });
+  assert.equal(history.status, 200); assert.equal(history.body.total, 10); assert.equal(history.body.purchases.length, 10);
+  assert(history.body.purchases.some(row => row.purchasedAt < start - 90 * 86400000));
+  assert.doesNotMatch(JSON.stringify(history), /private-|facts_json|receipt_hash|accountBinding|purchase_key|google:/);
+  assert.equal((await call('purchases.player', { id: 'synthe' })).body.total, 0);
+  await db.prepare("INSERT INTO player(id,created_at,updated_at) VALUES('paged',0,0)").run();
+  for(let n=0;n<51;n++)await db.prepare("INSERT INTO purchase_ledger(purchase_key,platform,transaction_id,player_id,product_id,receipt_hash,quantity,environment,verification_source,facts_json,status,created_at) VALUES(?,'apple',?,'paged','gems','receipt',1,'production','apple_signed_receipt','{}','granted',0)").bind('paged-key-'+n,'paged-transaction-'+n).run();
+  const first=await call('purchases.player',{id:'paged'});assert.equal(first.body.total,51);assert.equal(first.body.purchases.length,50);assert(first.body.nextCursor);
+  const second=await call('purchases.player',{id:'paged',cursor:first.body.nextCursor});assert.equal(second.body.purchases.length,1);assert.equal(second.body.nextCursor,null);
+  assert.equal(new Set([...first.body.purchases,...second.body.purchases].map(row=>row.id)).size,51);
+  assert.equal((await call('purchases.player',{id:'synthetic',cursor:first.body.nextCursor})).status,400);
+  for (const role of ['manager', 'guest']) assert.equal((await call('purchases.player', { id: 'synthetic' }, role)).status, 403);
+  for (const args of [{ id: 'synthetic', cursor: 'broken' }, { id: 'synthetic', cursor: btoa(JSON.stringify({ id: 'other', before: 9 })) }, { id: 'synthetic', extra: true }]) assert.equal((await call('purchases.player', args)).status, 400);
+});
+
 test('malformed facts fall back to ledger time; arbitrary extra finance fields are ignored; errors are redacted',async()=>{
  await db.prepare("UPDATE purchase_ledger SET facts_json='invalid-json' WHERE purchase_key='key0'").run();assert.equal((await call()).status,200);
  await db.prepare('ALTER TABLE purchase_ledger RENAME TO private_ledger_unavailable').run();const res=await call();assert.equal(res.status,503);assert.deepEqual(res.body,{error:'purchase_storage_unavailable'});assert.equal(outbound,0);

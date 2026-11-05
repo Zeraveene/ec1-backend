@@ -12,6 +12,12 @@ Login conflicts block migration and show the current backend owner for review. E
 
 Local fixtures use synthetic identities and intercepted outbound requests. Coverage includes historical conversion, source changes, immutable originals, edited legacy revisions, role/origin checks, provider outages, identity conflicts, active bans, staged-storage failures, concurrent publication, transaction rollback on audit failure, exact operation retries, delivery failures/retries and credential supersession. These tests do not migrate real players or prove real inbox delivery.
 
+### Exhausted legacy daily allowances
+
+Legacy preference and positional saves can contain negative exhausted booster quotas or treasure, march and chaos entry counters. Conversion clamps these counters to zero without awarding charges. The booster quota's missing or `-1` marker still means not activated. Other invalid values and negative counters in canonical snapshots remain rejected. Preview and migration audit details include the adjusted fields and original values; the immutable source archive retains the original bytes.
+
+This correction was deployed on November 5, 2026 as EC1 version `54b1af93-26cc-4f14-89bc-ab9f14240875`, replacing only the admin route module. All 216 backend tests, typecheck/build and isolated bundle checks passed. The affected archived source also passed conversion with only its two exhausted daily counters adjusted. No production account was migrated during validation.
+
 ## Production rollout
 
 On October 28, 2026, migration 036 was applied and the routes were deployed as EC1 version `e3ddfadd-90ad-4179-a835-011e995683e6`. The shared dashboard was deployed as version `ad5ed06b-0a66-4536-8f45-5ddf233fab7a`. The original live EC1/EC2 server modules, static asset bindings and other environment bindings were preserved byte-for-byte; isolated wrapper modules add only these routes and the rebuilt dashboard application. The dashboard source baseline was reconstructed from its deployed source map and reproduced the deployed JavaScript before the two migration UI changes were applied. The source implementations in the repositories also include the feature for subsequent normal builds.
