@@ -1,4 +1,5 @@
 import { validateOwnership, ownershipEnvelope, prepareOwnership, checkOwnership } from './ownership';
+import { createLegacyRecoveryApp } from '../migration/recovery';
 import schema from "./canonical-schema.json";
 import { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
@@ -54,6 +55,7 @@ export function validateCanonicalSnapshot(json:unknown): {json:string;playtime:n
 async function revision(env:Env,id:string,n:number){return env.DB.prepare('SELECT * FROM classic_backup_revision WHERE player_id=? AND revision=?').bind(id,n).first<Row>();}
 export function createBackupsApp(){
  const app=new Hono<AppEnv>();
+ app.route('/legacy-recovery',createLegacyRecoveryApp());
  app.use('*',async(c,next)=>{c.header('Cache-Control','no-store');if(c.env.EC1_MANUAL_BACKUPS_ENABLED!=='true')throw new GameError('manual_backups_disabled',503);if(c.get('player').scope!=='player')throw new GameError('insufficient_scope',403);await next();});
  app.get('/latest',async c=>{const id=c.get('player').playerId;const row=await c.env.DB.prepare('SELECT r.* FROM classic_backup_head h JOIN classic_backup_revision r ON r.player_id=h.player_id AND r.revision=h.revision WHERE h.player_id=?').bind(id).first<Row>();return c.json(row?await metadata(c.env,id,row):{playerId:id,exists:false,revision:0});});
  app.get('/revisions/:revision',async c=>{const n=Number(c.req.param('revision'));if(!Number.isSafeInteger(n)||n<1)throw new GameError('invalid_revision');const id=c.get('player').playerId,row=await revision(c.env,id,n);if(!row)throw new GameError('backup_not_found',404);const obj=await c.env.PLAYER_SAVES.get(row.r2_key);if(!obj)throw new GameError('backup_storage_unavailable',503);const json=await obj.text();if(await sha256(json)!==row.sha256||new TextEncoder().encode(json).length!==row.bytes)throw new GameError('backup_integrity_failure',503);return c.json({...await metadata(c.env,id,row),snapshotJson:json});});

@@ -1,3 +1,4 @@
+import { rubyGrant } from './ruby-offers';
 import type { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { rateLimit } from '../auth/maintenance';
@@ -9,7 +10,7 @@ import { hash } from '../auth/crypto';
 
 // Exact active native SKUs. Retired products remain verifiable for entitlement restoration.
 export const activeProducts = [
-  ...Array.from({length:8},(_,i)=>`ruby${i+1}`), 'jewel_red','jewel_orange','jewel_purple',
+  ...Array.from({length:8},(_,i)=>`ruby${i+1}`), 'ruby_offer', 'jewel_red','jewel_orange','jewel_purple',
   'premium','archer','souru','double_loot','more_exp','booster_pack',
   ...Array.from({length:5},(_,i)=>`stepup_${i+1}`),
   'iap_premium','iap_archer','iap_souru','iap_double_loot','iap_more_exp','iap_dual_booster',
@@ -86,8 +87,10 @@ export function installGrantRoutes(app: Hono<AppEnv>) {
       (definition.oneTimeKey?" AND EXISTS(SELECT 1 FROM purchase_offer_claim o WHERE o.player_id=l.player_id AND o.offer_key=? AND o.purchase_key=l.purchase_key) AND NOT EXISTS(SELECT 1 FROM purchase_entitlement e WHERE e.player_id=l.player_id AND e.key=? AND e.source_key!=l.purchase_key)":'')+
       (mode==='purchase'?" AND NOT EXISTS(SELECT 1 FROM purchase_grant g WHERE g.purchase_key=l.purchase_key AND g.mode='restore')":'');
     const values=[purchaseKey,playerId,productId,...(definition.oneTimeKey?[definition.oneTimeKey,definition.oneTimeKey]:[])];
-    statements.push(c.env.DB.prepare(`INSERT OR IGNORE INTO purchase_grant(grant_id,player_id,purchase_key,mode,operation_id,grant_json,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(${eligible})`)
-      .bind(grantId,playerId,purchaseKey,mode,operationId,JSON.stringify(grant),now,...values));
+    const ruby = rubyGrant(c.env.DB, playerId, purchaseKey, productId, grant, false);
+    statements.push(...ruby.reservation);
+    statements.push(c.env.DB.prepare(`INSERT OR IGNORE INTO purchase_grant(grant_id,player_id,purchase_key,mode,operation_id,grant_json,created_at) SELECT ?,?,?,?,?,${ruby.sql},? WHERE EXISTS(${eligible})`)
+      .bind(grantId,playerId,purchaseKey,mode,operationId,...ruby.args,now,...values));
     for(const [key,value] of Object.entries(definition.entitlements)) statements.push(c.env.DB.prepare(`INSERT INTO purchase_entitlement(player_id,key,value,source_key) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM purchase_grant WHERE grant_id=? AND player_id=?) ON CONFLICT(player_id,key) DO UPDATE SET value=excluded.value,source_key=excluded.source_key`)
       .bind(playerId,key,value,purchaseKey,grantId,playerId));
     await c.env.DB.batch(statements);

@@ -15,6 +15,7 @@ import {
   verifyAppleReceipt,
 } from "./receipts";
 import { PurchaseError, verifyStore } from "./store";
+import { availableRubyBonuses } from './ruby-offers';
 import { productGrant } from "./catalog";
 import { installEditorPurchaseRoutes } from "./editor-test";
 import { accountBinding, hex, protocol } from './binding';
@@ -94,14 +95,22 @@ export function createPurchasesApp() {
     const platform = c.req.query('platform');
     if (platform !== undefined && platform !== 'google' && platform !== 'apple') throw new PurchaseError('invalid_purchase_request');
     const products = configuredProducts(c.env, platform);
-    const b = await accountBinding(c.env, c.get("player").playerId);
+    const playerId = c.get("player").playerId;
+    const editor = c.req.query("shop") === "editor";
+    const rubyOfferClaimed = await c.env.DB.prepare(editor
+      ? "SELECT 1 FROM purchase_editor_grant WHERE player_id=? AND product_id='ruby_offer'"
+      : "SELECT 1 FROM purchase_offer_claim WHERE player_id=? AND offer_key='ruby_offer'")
+      .bind(playerId).first();
+    const b = await accountBinding(c.env, playerId);
     return c.json({
       game: "ec1",
       googleObfuscatedAccountId: b.google_account_id,
       appleAppAccountToken: b.apple_account_token,
       purchasesEnabled: products.length > 0,
       deliveryProtocol: protocol,
-      enabledProductIds: products,
+      enabledProductIds: rubyOfferClaimed ? products.filter(id => id !== "ruby_offer") : products,
+      rubyOfferAvailable: !rubyOfferClaimed && (editor || products.includes("ruby_offer")),
+      rubyFirstBonuses: await availableRubyBonuses(c.env.DB, playerId, editor),
     });
   });
   app.get("/ledger", async (c) =>

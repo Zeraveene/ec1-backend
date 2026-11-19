@@ -1,5 +1,11 @@
 # EC1 implementation contract
 
+## Explicit GPGS recovery — November 12, 2026
+
+Account-open optional GPGS sign-in is owned by `src/auth/gpgs-legacy.ts` and reuses the source verification/archive/publication modules. Existing native identities and recovery source claims log into their owner; new verified legacy saves publish player/identity/backup/claims atomically, and absent saves create no player. See [gpgs-legacy-signin.md](gpgs-legacy-signin.md) for the public endpoint and pre-existing lookup-account credential contract.
+
+`src/migration/recovery.ts` owns explicit recovery into a signed-in player's empty cloud backup; `recovery-proof.ts` verifies the GPGS source independently of native Google sign-in. Immutable archives, atomic global source claims and reciprocal historical-publisher guards require migration 037. See [legacy-recovery.md](legacy-recovery.md) for endpoint contracts, configuration and the maintained lookup-session prerequisite for no-PlayFab-account fallback. This does not restore local progress or mutate PlayFab.
+
 ## Production-app story test — accepted October 26, 2026
 
 The user selected the existing production-app coupon UI and the configured editor-purchase developer account for a destructive local story run. Progress may be discarded; no test-specific backup, restoration, or progression/service isolation is requested. `src/liveops/story-test.ts` owns eligibility, run creation and report storage; coupon routes wire authenticated calls only. Configuration is `STORY_TEST_ENABLED`, `STORY_TEST_PLAYERS`, `STORY_TEST_COUPON`. Normal coupon grants remain unchanged, and diagnostics never enter replayable reward recovery. Reports go only to `AUDIT_BLOBS` under `story-tests/<authenticated-playerId>/<runId>/result.json`; no gameplay save or PlayFab write is made by these routes. Local checks use synthetic profiles and intercepted network. See Unity `docs/story-playtest.md` for lifecycle ownership and device behavior. Release/TestFlight notes should disclose the diagnostic mode: https://developer.apple.com/app-store/review/guidelines/.

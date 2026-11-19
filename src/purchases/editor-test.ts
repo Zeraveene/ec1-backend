@@ -1,3 +1,4 @@
+import { rubyGrant } from './ruby-offers';
 import type { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
 async function hash(value: string) {
@@ -14,7 +15,7 @@ function permitted(env: Env, playerId: string) {
 }
 function activeProduct(id: string) {
   const sku = id.startsWith("iap_") ? id.slice(4) : id;
-  return /^(ruby[1-8]|jewel_(red|orange|purple)|premium|archer|souru|double_loot|more_exp|dual_booster|booster_pack|stepup_[1-5])$/.test(sku);
+  return /^(ruby[1-8]|ruby_offer|jewel_(red|orange|purple)|premium|archer|souru|double_loot|more_exp|dual_booster|booster_pack|stepup_[1-5])$/.test(sku);
 }
 interface Row { grant_json: string; product_id: string; platform: string }
 
@@ -54,14 +55,17 @@ export function installEditorPurchaseRoutes(app: Hono<AppEnv>) {
       rewards: definition.rewards,
       entitlements: Object.fromEntries(Object.entries(definition.entitlements).map(([k,v]) => [k, Number(v)])),
     };
+    const ruby = rubyGrant(c.env.DB, playerId, purchaseKey, productId, grant, true);
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT OR IGNORE INTO purchase_ledger(purchase_key,platform,transaction_id,player_id,product_id,receipt_hash,quantity,environment,verification_source,facts_json,operation_id,created_at) VALUES(?,?,?,?,?,?,1,'test','unity_editor',?,?,?)")
         .bind(purchaseKey, platform, purchaseKey, playerId, productId, await hash(JSON.stringify(body)),
           JSON.stringify({ environment: "test", source: "unity_editor", quantity: 1, purchaseTime: createdAt }), operationId, createdAt),
-      c.env.DB.prepare("INSERT OR IGNORE INTO purchase_editor_grant(grant_id,player_id,operation_id,purchase_key,product_id,platform,grant_json,created_at) VALUES(?,?,?,?,?,?,?,?)")
-        .bind(grantId, playerId, operationId, purchaseKey, productId, platform, JSON.stringify(grant), createdAt),
+      ...ruby.reservation,
+      c.env.DB.prepare(`INSERT OR IGNORE INTO purchase_editor_grant(grant_id,player_id,operation_id,purchase_key,product_id,platform,grant_json,created_at) SELECT ?,?,?,?,?,?,${ruby.sql},? WHERE ? != 'ruby_offer' OR NOT EXISTS(SELECT 1 FROM purchase_editor_grant WHERE player_id=? AND product_id='ruby_offer')`)
+        .bind(grantId, playerId, operationId, purchaseKey, productId, platform, ...ruby.args, createdAt, productId, playerId),
     ]);
     const saved = await read();
+    if (!saved && productId === 'ruby_offer') throw new PurchaseError('purchase_entitlement_already_owned',409);
     if (!saved) throw new PurchaseError("purchase_service_unavailable", 503);
     return replay(saved);
   });

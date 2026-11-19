@@ -15,7 +15,9 @@ import { AuthError, providerProof } from "./providers";
 import { bootstrapAcknowledgementWindow, rateLimit } from "./maintenance";
 import { browserAuthorize, browserConfig, createBrowserAuth } from "./browser";
 import { createDiscordBridge } from "./discord-bridge";
-import { beginEmailClassic, beginClassicProof, finalizeClassic } from "./legacy-cutover";
+import { createGpgsLegacyApp } from "./gpgs-legacy";
+import { GameError } from "../game/validation";
+import { beginEmailClassic, beginClassicProof, finalizeClassic, prepareNativeClassicProof } from "./legacy-cutover";
 import {
   activeDeviceSession,
   credentialOwner,
@@ -476,6 +478,7 @@ export function createAuthApp() {
           },
           error.status,
         )
+      : error instanceof GameError ? c.json({error:error.code},error.status as any)
       : c.json({ error: "auth_unavailable" }, 503),
   );
   app.use("*", async (c, next) => {
@@ -510,6 +513,11 @@ export function createAuthApp() {
     }
     await next();
   });
+  app.route('/gpgs/legacy',createGpgsLegacyApp(async(env,id,subject,seed)=>{
+    const identity=await stmt(env,"SELECT password_hash,salt,created_at FROM auth_identity WHERE provider='gpgs' AND subject=? AND player_id=?",subject,id).first<{password_hash:string|null;salt:string|null;created_at:number}>();
+    if(!identity)throw new AuthError('invalid_credentials',401);
+    return openSession(env,id,'gpgs',null,seed,undefined,undefined,{subject,passwordHash:identity.password_hash,salt:identity.salt,createdAt:identity.created_at});
+  }));
   app.post("/migration/classic/finalize", requirePlayer, async c => {
     const p = c.get("player");
     if(p.scope!=="migration" || p.provider!=="legacy") throw new AuthError("insufficient_scope",403);
@@ -1072,7 +1080,7 @@ function wireProviders(app: Hono<AppEnv>) {
     if (intent === "signin") {
       if (!identity) {
         if (provider === "google" && c.env.LEGACY_MIGRATION_ENABLED === "true") {
-          if (!challenge.browser_transport) throw new AuthError("legacy_google_browser_required",409);
+          if (!challenge.browser_transport) await prepareNativeClassicProof(c.env, challengeId, subject, b.accessToken);
           return c.json(await beginClassicProof(c.env, challengeId, subject, typeof b.deviceId === "string" ? b.deviceId : null));
         }
         throw new AuthError("identity_not_registered", 404);

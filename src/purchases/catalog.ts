@@ -26,6 +26,7 @@ const jewels = (amount: number) =>
     material(`jewel_${kind}_e`, amount),
   );
 const logical: Record<string, ProductGrant> = {
+  ruby_offer: { rewards: currency(800), entitlements: {}, oneTimeKey: "ruby_offer" },
   premium: { rewards: [], entitlements: flags("premium") },
   archer: { rewards: [], entitlements: flags("louisaUnlock") },
   souru: { rewards: [], entitlements: flags("soulUnlock") },
@@ -111,8 +112,11 @@ const logical: Record<string, ProductGrant> = {
     oneTimeKey: "stepUp5",
   },
 };
-for (const [index, amount] of [9, 32, 100, 200, 400, 800, 1600, 3200].entries())
-  logical[`ruby${index + 1}`] = { rewards: currency(amount), entitlements: {} };
+export const rubyFirstBonuses: Readonly<Record<string, number>> = {
+  ruby3: 100, ruby4: 200, ruby5: 400, ruby6: 800, ruby7: 1600, ruby8: 3200,
+};
+for (const [sku, amount] of Object.entries({ ruby1: 9, ruby2: 32, ...rubyFirstBonuses }))
+  logical[sku] = { rewards: currency(amount), entitlements: {} };
 for (const [sku, indices] of Object.entries({
   xmas_pack: [1, 1, 1, 2],
   brave_pack: [2, 2, 2, 3],
@@ -178,7 +182,7 @@ export function productGrant(
   const key =
     platform === "apple"
       ? iosAliases[productId] ||
-        (/^(ruby[1-8]|jewel_(red|orange|purple))$/.test(productId)
+        (/^(ruby[1-8]|ruby_offer|jewel_(red|orange|purple))$/.test(productId)
           ? productId
           : "")
       : productId;
@@ -190,7 +194,7 @@ export function productGrant(
 /** Safe admin metadata; prices and sale status always come from store verification. */
 export function purchaseAdminCatalog() {
   const names: Record<string, string> = {
-    premium: 'Premium', archer: 'Unlock Louisa', souru: 'Unlock Soul',
+    ruby_offer: '800 Ruby One-Time Offer', premium: 'Premium', archer: 'Unlock Louisa', souru: 'Unlock Soul',
     double_loot: 'Double Loot', more_exp: 'More EXP', starter: 'Starter Pack',
     booster_pack: 'Dual Booster', xmas_pack: 'Christmas Costume Pack',
     brave_pack: 'Brave Costume Pack', lny_pack: 'Lunar New Year Costume Pack',
@@ -203,7 +207,7 @@ export function purchaseAdminCatalog() {
     id.split('_').map(word => word[0].toUpperCase() + word.slice(1)).join(' '));
   const products: Array<{platform:'google'|'apple';productId:string;name:string;rewards:Reward[];entitlements:string[];iconId:string|null}> = [];
   for (const platform of ['google','apple'] as const) {
-    const ids = platform === 'google' ? Object.keys(logical) : [...Object.keys(iosAliases),...Object.keys(logical).filter(id=>/^(ruby[1-8]|jewel_(red|orange|purple))$/.test(id))];
+    const ids = platform === 'google' ? Object.keys(logical) : [...Object.keys(iosAliases),...Object.keys(logical).filter(id=>/^(ruby[1-8]|ruby_offer|jewel_(red|orange|purple))$/.test(id))];
     for (const productId of ids.sort()) {
       const grant = productGrant(platform, productId);
       const logicalId = platform === 'apple' ? iosAliases[productId] ?? productId : productId;

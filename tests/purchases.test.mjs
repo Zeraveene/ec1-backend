@@ -916,6 +916,32 @@ test('production grants are immutable across concurrent validation and create no
  assert.equal((await request(ack,{operationId:input.operationId},'POST',guestSession.accessToken)).status,200);
  assert.equal((await db.prepare('SELECT status FROM purchase_ledger WHERE purchase_key=?').bind(a.purchaseKey).first()).status,'granted');
 });
+test('two paid receipts for one Ruby tier both deliver and only one receives the first bonus',async()=>{
+ const purchases = await Promise.all(['ruby-race-a','ruby-race-b'].map(token => modernProof('ruby8',token)));
+ const send = proof => request('/api/purchases/validate',proof,'POST',guestSession.accessToken);
+ const grants = await Promise.all(purchases.map(send));
+ assert.deepEqual(grants.map(g => g.status),[200,200]);
+ assert.deepEqual(grants.map(g => g.rewards.map(r => r.amount)).sort((a,b)=>a.length-b.length),[[3200],[3200,3200]]);
+ assert.deepEqual(await Promise.all(purchases.map(send)),grants);
+ const offers = await request('/api/purchases/account-binding?platform=apple',null,'GET',guestSession.accessToken);
+ assert.equal(offers.rubyFirstBonuses.ruby8,undefined);
+ assert.deepEqual(offers.rubyFirstBonuses,{ruby3:100,ruby4:200,ruby5:400,ruby6:800,ruby7:1600});
+});
+
+test('the standalone Ruby offer grants 800 once, independently of the regular 800 tier',async()=>{
+ const send = proof => request('/api/purchases/validate',proof,'POST',guestSession.accessToken);
+ const proof = await modernProof('ruby_offer','standalone-offer');
+ const first = await send(proof);
+ assert.equal(first.status,200);
+ assert.deepEqual(first.rewards,[{id:'ruby',amount:800}]);
+ assert.deepEqual(await send(proof),first);
+ assert.equal((await send(await modernProof('ruby_offer','standalone-repeat'))).status,409);
+ const binding = await request('/api/purchases/account-binding?platform=apple',null,'GET',guestSession.accessToken);
+ assert.equal(binding.rubyOfferAvailable,false);
+ assert.equal(binding.enabledProductIds.includes('ruby_offer'),false);
+ assert.equal(binding.rubyFirstBonuses.ruby6,800);
+});
+
 test('forged, pending, foreign, wrong quantity, test payments and client rewards never issue grants',async()=>{
  for(const [name,patch] of [['pending',{purchaseStateContext:{purchaseState:'PENDING'}}],['quantity',{productLineItem:[{productId:'ruby1',productOfferDetails:{quantity:2}}]}],['foreign',{obfuscatedExternalAccountId:'foreign'}],['test',{testPurchaseContext:{fopType:'TEST'}}]]){
   const input=await modernProof('ruby1','modern-'+name);

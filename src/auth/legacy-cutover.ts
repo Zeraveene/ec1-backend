@@ -29,6 +29,20 @@ export async function prepareBrowserClassicProof(env:Env,challengeId:string,subj
  if(legacy.account?.GoogleInfo?.GoogleId!==subject)throw new AuthError('legacy_identity_mismatch',403);
  await putProof(env,challengeId,legacy.id,'google',subject);
 }
+/** Called only after native ID-token verification and challenge consumption.
+ * The access token is transient provider proof, never a stored credential. */
+export async function prepareNativeClassicProof(env:Env,challengeId:string,subject:string,accessToken:unknown){
+ const challenge=await query(env,"SELECT 1 FROM auth_challenge WHERE id=? AND provider='google' AND intent='signin' AND browser_transport=0 AND verified_subject=? AND used_at IS NOT NULL AND expires_at>?",challengeId,subject,now()).first();
+ if(!challenge)throw new AuthError('invalid_or_used_challenge',401);
+ if(await query(env,"SELECT 1 FROM auth_identity WHERE provider='google' AND subject=?",subject).first())throw new AuthError('native_signin_required',409);
+ if(accessToken===undefined||accessToken===null||accessToken==='')throw new AuthError('legacy_google_browser_required',409);
+ if(typeof accessToken!=='string'||accessToken.length>8192)throw new AuthError('invalid_legacy_credentials',401);
+ // Lost-response retries of the same consumed challenge reuse the bound proof.
+ if(await query(env,"SELECT 1 FROM classic_auth_proof WHERE id=? AND provider='google' AND subject=? AND expires_at>?",challengeId,subject,now()).first())return;
+ const legacy=await legacyLogin(env,'LoginWithGoogleAccount',{AccessToken:accessToken});
+ if(legacy.account?.GoogleInfo?.GoogleId!==subject)throw new AuthError('legacy_identity_mismatch',403);
+ await putProof(env,challengeId,legacy.id,'google',subject);
+}
 export async function beginEmailClassic(env:Env,subject:string,password:string,deviceId:string|null){
  const legacy=await legacyLogin(env,'LoginWithEmailAddress',{Email:subject,Password:password});
  const verifiedEmail=legacy.account?.PrivateInfo?.Email;
@@ -75,3 +89,4 @@ export async function finalizeClassic(env:Env,playerId:string,sessionId:string){
  if(!await query(env,'SELECT 1 FROM auth_session WHERE id=?',sid).first())throw new AuthError('migration_finalize_conflict',409);
  return {scope:'player',playerId,accessToken:await signToken(env.PLAYER_TOKEN_SECRET,{sub:playerId,sid,provider:proof.provider,scope:'player',deviceId:null}),refreshToken:refresh,expiresIn:900,saveState:'migrated',saveVersion:0};
 }
+

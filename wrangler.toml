@@ -25,6 +25,9 @@ ENVIRONMENT = "production-preparation"
 CLASSIC_ADMIN_ORIGIN = "https://ec2mod.codezrv.com"
 # Existing EC1 PlayFab Web App public audience; native Android package/signing verified.
 GOOGLE_CLIENT_IDS = "1078144059071-56j0to4phj699691rg0j87iuupd75e1k.apps.googleusercontent.com"
+# GPGS legacy identity verification; private secret is a Worker secret binding.
+GPGS_RECOVERY_CLIENT_ID = "1078144059071-56j0to4phj699691rg0j87iuupd75e1k.apps.googleusercontent.com"
+GPGS_RECOVERY_APPLICATION_ID = "1078144059071"
 # Native Sign in with Apple ID-token audience; no web Services ID or private key required.
 APPLE_CLIENT_IDS = "com.gacogames.epiccon"
 # Dedicated confidential browser clients; private credentials use Worker secret bindings.

@@ -41,10 +41,20 @@ test('only the configured player with a real player session can issue test grant
  assert.equal((await db.prepare('SELECT save_version FROM player WHERE id=?').bind('tester').first()).save_version,0);
 });
 test('retries and concurrent requests preserve one immutable server-defined grant',async()=>{
- const [a,b]=await Promise.all([req('/editor-test',body('ruby1','race')),req('/editor-test',body('ruby1','race'))]);
- assert.equal(a.status,200);assert.deepEqual(a,b);assert.equal(a.body.rewards[0].amount,9);
+ const [a,b]=await Promise.all([req('/editor-test',body('ruby3','race')),req('/editor-test',body('ruby3','race'))]);
+ assert.equal(a.status,200);assert.deepEqual(a,b);assert.deepEqual(a.body.rewards.map(r=>r.amount),[100,100]);
+ const repeat=await req('/editor-test',body('ruby3','second'));
+ assert.deepEqual(repeat.body.rewards.map(r=>r.amount),[100]);
  assert.equal((await req('/editor-test',body('ruby2','race'))).status,409);
  assert.equal((await db.prepare('SELECT COUNT(*) n FROM purchase_editor_grant WHERE player_id=? AND operation_id=?').bind('tester',op('race')).first()).n,1);
+});
+test('the editor Ruby offer can be purchased only once per tester across platforms',async()=>{
+ const requests=[body('ruby_offer','offer-a'),{...body('ruby_offer','offer-b'),platform:'apple'}];
+ const results=await Promise.all(requests.map(input=>req('/editor-test',input)));
+ assert.deepEqual(results.map(result=>result.status).sort(),[200,409]);
+ const winner=results.findIndex(result=>result.status===200);
+ assert.deepEqual(results[winner].body.rewards,[{id:'ruby',amount:800}]);
+ assert.deepEqual(await req('/editor-test',requests[winner]),results[winner]);
 });
 test('client cannot supply rewards, spoof production or buy retired products',async()=>{
  for(const patch of [{rewards:[{id:'ruby',amount:999}]},{environment:'production'},{test:false},{platform:'editor'},{productId:'starter'},{productId:'xmas_pack'},{productId:'wyvern_red_alaster'}])assert.equal((await req('/editor-test',{...body(),...patch})).status,400);
