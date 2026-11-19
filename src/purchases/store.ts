@@ -12,7 +12,7 @@ export class PurchaseError extends Error {
 }
 const encoder = new TextEncoder(),
   tokens = new Map<string, { token: string; expires: number }>();
-async function publisherToken(credential: string) {
+export async function publisherToken(credential: string) {
   let config: { type: string; client_email: string; private_key: string };
   try {
     config = JSON.parse(credential);

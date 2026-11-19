@@ -91,6 +91,17 @@ export function installGrantRoutes(app: Hono<AppEnv>) {
     statements.push(...ruby.reservation);
     statements.push(c.env.DB.prepare(`INSERT OR IGNORE INTO purchase_grant(grant_id,player_id,purchase_key,mode,operation_id,grant_json,created_at) SELECT ?,?,?,?,?,${ruby.sql},? WHERE EXISTS(${eligible})`)
       .bind(grantId,playerId,purchaseKey,mode,operationId,...ruby.args,now,...values));
+    if (mode === 'purchase' && facts.environment === 'production') {
+      const apple = verified.appleData;
+      const price = apple?.price;
+      const currency = typeof apple?.currency === 'string' && /^[A-Z]{3}$/.test(apple.currency) ? apple.currency : null;
+      const micros = currency && typeof price === 'number' && price >= 0 && Number.isSafeInteger(price) && Number.isSafeInteger(price * 1000)
+        ? price * 1000 : null;
+      statements.push(c.env.DB.prepare(`INSERT OR IGNORE INTO purchase_report_outbox(grant_id,purchase_key,purchased_at,currency,amount_micros)
+        SELECT g.grant_id,l.purchase_key,?,?,? FROM purchase_grant g JOIN purchase_ledger l USING(purchase_key)
+        WHERE g.grant_id=? AND g.player_id=? AND g.mode='purchase' AND l.environment='production' AND l.status!='revoked'`)
+        .bind(facts.purchaseTime ?? now, micros == null ? null : currency, micros, grantId, playerId));
+    }
     for(const [key,value] of Object.entries(definition.entitlements)) statements.push(c.env.DB.prepare(`INSERT INTO purchase_entitlement(player_id,key,value,source_key) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM purchase_grant WHERE grant_id=? AND player_id=?) ON CONFLICT(player_id,key) DO UPDATE SET value=excluded.value,source_key=excluded.source_key`)
       .bind(playerId,key,value,purchaseKey,grantId,playerId));
     await c.env.DB.batch(statements);

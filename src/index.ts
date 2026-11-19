@@ -94,3 +94,5 @@ export default {
 };
 
 export { AdminWorkspace } from "./admin/workspace";
+
+export { ClassicPurchaseReports } from "./purchases/reports";

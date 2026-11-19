@@ -256,6 +256,7 @@ before(async () => {
     "020_purchases.sql",
     "021_device_credentials.sql",
     "035_purchase_grants.sql",
+    "038_purchase_report_outbox.sql",
   ])
     for (const statement of (await readFile(`migrations/${file}`, "utf8"))
       .split(";")
@@ -980,7 +981,7 @@ test('grant publication failure rolls back reservation and can be retried withou
 });
 
 test('Apple signed production grant and entitlement-only restore use the same guest contract',async()=>{
- const payload={bundleId:packageName,productId:'iap_premium',transactionId:'modern-apple-paid',purchaseDate:Date.now(),signedDate:Date.now(),quantity:1,environment:'Production',appAccountToken:guestBinding.appleAppAccountToken};
+ const payload={bundleId:packageName,productId:'iap_premium',transactionId:'modern-apple-paid',price:4990,currency:'USD',purchaseDate:Date.now(),signedDate:Date.now(),quantity:1,environment:'Production',appAccountToken:guestBinding.appleAppAccountToken};
  const signed=value=>{
   const h=Buffer.from(JSON.stringify({alg:'ES256',x5c:appleChain})).toString('base64url'),p=Buffer.from(JSON.stringify(value)).toString('base64url');
   return h+'.'+p+'.'+sign('sha256',Buffer.from(h+'.'+p),{key:appleLeafKey,dsaEncoding:'ieee-p1363'}).toString('base64url');
@@ -991,6 +992,8 @@ test('Apple signed production grant and entitlement-only restore use the same gu
  assert.equal((await db.prepare('SELECT transaction_id FROM purchase_ledger WHERE purchase_key=?').bind(sale.purchaseKey).first()).transaction_id,'modern-apple-paid');
  const restore=await request('/api/purchases/validate',{...input,mode:'restore'},'POST',guestSession.accessToken);
  assert.equal(restore.status,200);assert.equal(restore.kind,'entitlement-restore');assert.deepEqual(restore.rewards,[]);
+ const reports=await db.prepare('SELECT grant_id,currency,amount_micros FROM purchase_report_outbox WHERE purchase_key=?').bind(sale.purchaseKey).all();
+ assert.deepEqual(reports.results,[{grant_id:sale.grantId,currency:'USD',amount_micros:4990000}]);
  const revoked=await request('/api/purchases/validate',{...input,mode:'restore',jwsReceipt:signed({...payload,revocationDate:Date.now()})},'POST',guestSession.accessToken);
  assert.equal(revoked.status,401);
 });
