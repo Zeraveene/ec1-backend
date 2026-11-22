@@ -1,3 +1,5 @@
+import { updatePlayerBan } from "./player-ban";
+import { AdminActionError } from "./action-types";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
@@ -135,12 +137,19 @@ const requireAdmin = createMiddleware<AppEnv>(async (c, next) => {
     c.req.header("Origin") !== new URL(c.req.url).origin
   )
     return c.json({ error: "invalid_origin" }, 403);
-  c.set("admin", { id: session.id, name: String(session.name || session.id) });
+  const role = await c.env.ADMIN_AUTHORITY?.getRole?.(session.id);
+  if (role !== "internal" && role !== "manager" && role !== "guest")
+    return c.json({ error: "admin_unauthorized" }, 403);
+  if (c.req.method !== "GET" && c.req.method !== "HEAD" && role !== "internal" &&
+      c.req.path !== "/api/admin/logout" &&
+      !(role === "manager" && c.req.method === "POST" && /^\/api\/admin\/players\/[^/]+\/(?:ban|restore)$/.test(c.req.path)))
+    return c.json({ error: "forbidden_role" }, 403);
+  c.set("admin", { id: session.id, name: String(session.name || session.id), role });
   await next();
 });
 function handler(error: Error, c: any) {
   if (
-    error instanceof AdminError ||
+    error instanceof AdminActionError || error instanceof AdminError ||
     error instanceof GameError ||
     error instanceof AuthError
   )
@@ -478,36 +487,7 @@ export function createAdminApp() {
     return c.json({ id: mailId }, 201);
   });
   app.post("/players/:id/ban", async (c) => {
-    const id = c.req.param("id");
-    await exists(c.env, id);
-    const b = await body(c);
-    let mutation: D1PreparedStatement;
-    if (b.revoked === true) {
-      mutation = c.env.DB.prepare(
-        "UPDATE player_ban SET revoked_at=? WHERE player_id=?",
-      ).bind(Math.floor(Date.now() / 1000), id);
-    } else {
-      const reason = string(b.reason, 1000),
-        expires = b.expiresAt ?? null;
-      if (
-        expires !== null &&
-        (!Number.isSafeInteger(expires) ||
-          expires <= Math.floor(Date.now() / 1000))
-      )
-        throw new AdminError("invalid_expiry");
-      mutation = c.env.DB.prepare(
-        "INSERT INTO player_ban(player_id,reason,created_at,expires_at,revoked_at) VALUES(?,?,?,?,NULL) ON CONFLICT(player_id) DO UPDATE SET reason=excluded.reason,created_at=excluded.created_at,expires_at=excluded.expires_at,revoked_at=NULL",
-      ).bind(id, reason, Math.floor(Date.now() / 1000), expires);
-    }
-    await c.env.DB.batch([
-      mutation,
-      audit(c.env, c.get("admin"), "ban.update", id, {
-        revoked: b.revoked === true,
-        reason: b.reason,
-        expiresAt: b.expiresAt,
-      }),
-    ]);
-    return c.json({ ok: true });
+    return c.json(await updatePlayerBan(c.env, c.get("admin"), c.req.param("id"), await body(c)));
   });
   app.post("/players/:id/restore", async (c) => {
     const id = c.req.param("id");

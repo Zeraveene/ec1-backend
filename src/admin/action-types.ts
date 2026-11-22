@@ -3,6 +3,9 @@ export interface AdminActor { id: string; name: string; role: AdminRole }
 export class AdminActionError extends Error {
   constructor(public code: string, public status = 400) { super(code); }
 }
+export function requireAccountRecoveryRole(actor: AdminActor): void {
+  if (actor.role !== "internal" && actor.role !== "manager") throw new AdminActionError("forbidden_role", 403);
+}
 export function requireWriter(actor: AdminActor): void {
   if (actor.role !== "internal") throw new AdminActionError("forbidden_role", 403);
 }

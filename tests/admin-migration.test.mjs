@@ -38,7 +38,7 @@ before(async () => {
         if (method === '/Admin/GetUserBans') return Response.json({ data: { BanData: id.endsWith('0002') ? [{ BanId: 'ban-1', Active: true, PlayFabId: id }] : [] } });
         throw Error('PlayFab writes and unapproved network are forbidden: ' + method);
       } },
-    { name: 'central', modules: true, script: `export default {fetch(req){return Response.json({discordId:'111111111111111111',username:'fixture',role:req.headers.get('Cookie').includes('guest')?'guest':'internal'})}};` },
+    { name: 'central', modules: true, script: `export default {fetch(req){return Response.json({discordId:'111111111111111111',username:'fixture',role:req.headers.get('Cookie').includes('guest')?'guest':'manager'})}};` },
   ] }));
   db = await mf.getD1Database('DB', 'classic');
   await db.exec('CREATE TABLE fixture_mail_control(fail INTEGER); INSERT INTO fixture_mail_control VALUES(0); CREATE TABLE fixture_mail(body TEXT)');
@@ -95,7 +95,7 @@ test('daily repair is legacy-only and never accepts malformed counters or unrela
     assert.equal((await convert(JSON.stringify(canonical))).status, 409, key);
   }
 });
-test('preview requires internal central session and origin; no target player or credentials are created', async () => {
+test('preview requires an authorized central session and origin; no target player or credentials are created', async () => {
   const id = 'AAAABBBB0001'; const before = outboundCalls;
   assert.equal((await req(`/legacy/${id}/migrate/preview`, {}, { guest: true })).status, 403);
   assert.equal((await req(`/legacy/${id}/migrate/preview`, {}, { origin: 'https://evil.invalid' })).status, 403); assert.equal(outboundCalls, before);

@@ -32,10 +32,10 @@ test('canonical admin format scopes metadata, download and append-only reviewed 
  assert.equal((await admin('revisionGet',args,'guest')).status,403);
  const listing=await(await admin('revisionList',args,'guest')).json();assert.equal(listing.headRevision,3);assert.equal(listing.revisions[0].format,'canonical');
  const download=await(await admin('revisionGet',args)).json();assert.equal(gameplay(download.snapshotJson),snapshot(100));
- const preview=await(await admin('revisionPreviewRestore',args)).json();
+ const preview=await(await admin('revisionPreviewRestore',args,'manager')).json();
  const restore={...args,expectedSaveVersion:3,operationId:'admin-restoring',reviewSha256:preview.reviewSha256};
- let r=await admin('revisionRestore',restore);assert.equal(r.status,200);const saved=await r.json();assert.equal(saved.revision,4);
- assert.deepEqual(await(await admin('revisionRestore',restore)).json(),saved);
+ let r=await admin('revisionRestore',restore,'manager');assert.equal(r.status,200);const saved=await r.json();assert.equal(saved.revision,4);
+ assert.deepEqual(await(await admin('revisionRestore',restore,'manager')).json(),saved);
  assert.equal((await admin('revisionRestore',{...restore,version:2})).status,409);
  assert.equal(gameplay((await(await request('revisions/4')).json()).snapshotJson),snapshot(100));
  assert.equal(gameplay((await(await request('revisions/1')).json()).snapshotJson),snapshot(100));

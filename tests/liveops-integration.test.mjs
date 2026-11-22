@@ -8,7 +8,7 @@ const origin='https://classic-admin.test';
 before(async()=>{
  const built=await build({entryPoints:['src/index.ts'],bundle:true,write:false,format:'esm',platform:'browser',external:['cloudflare:workers']});
  mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'classic',modules:true,script:built.outputFiles[0].text,compatibilityDate:'2026-10-06',d1Databases:{DB:'integration-classic'},bindings:{CLASSIC_ADMIN_ORIGIN:origin},serviceBindings:{EC2_ADMIN_SESSION:'central'},outboundService:()=>{throw Error('No network allowed');}},{name:'central',modules:true,compatibilityDate:'2026-10-06',d1Databases:{DB:'integration-central'},script:`export default {async fetch(req,env){if(req.headers.get('Cookie')!=='ec2mod_session=synthetic')return Response.json({error:'unauthenticated'},{status:401});const row=await env.DB.prepare('SELECT role FROM state').first();if(row.role==='removed')return Response.json({}, {status:401});return Response.json({discordId:'111111111111111111',username:'Synthetic',role:row.role});}};`}]}));
- db=await mf.getD1Database('DB','classic');central=await mf.getD1Database('DB','central');await central.exec("CREATE TABLE state(role TEXT); INSERT INTO state VALUES('manager');");
+ db=await mf.getD1Database('DB','classic');central=await mf.getD1Database('DB','central');await central.exec("CREATE TABLE state(role TEXT); INSERT INTO state VALUES('internal');");
  for(const file of (await readdir('migrations')).filter(f=>f.endsWith('.sql')).sort())await db.exec((await readFile('migrations/'+file,'utf8')).replace(/--[^\n]*/g,'').replace(/\n/g,' '));
  await db.prepare("INSERT INTO player(id,created_at,updated_at) VALUES('recipient',1,1)").run();
 });
@@ -26,9 +26,9 @@ test('direct admin transport authenticates, separates reads/writes and uses Clas
  assert.equal((await req('/liveops/coupons/list?args=not-json')).status,400);
  assert.equal((await req('/liveops/mail/send',{}, {Origin:'https://evil.invalid'})).status,403);
  assert.equal((await write('news','create',{padding:'x'.repeat(270000)})).status,413);
- assert.equal((await req('/capabilities')).body.canWrite,false);assert.equal((await req('/capabilities')).body.canManageLiveOps,true);
+ assert.equal((await req('/capabilities')).body.canWrite,true);assert.equal((await req('/capabilities')).body.canManageLiveOps,true);
 });
-test('manager creates all feature records over mounted routes; guest cannot mutate',async()=>{
+test('internal creates all feature records over mounted routes; managers and guests cannot mutate',async()=>{
  const coupon=await write('coupons','create',{operationId:'coupon-create',code:'INTEGRATION',title:'Synthetic',rewards:[{id:'gold',amount:2}],enabled:true});assert.equal(coupon.status,201,JSON.stringify(coupon));
  assert.equal((await read('coupons','list')).body.coupons.length,1);
  const args={operationId:'mail-create',playerId:'recipient',title:'Synthetic mail',body:'For integration',rewards:[{id:'apple',amount:1}]};
@@ -37,10 +37,12 @@ test('manager creates all feature records over mounted routes; guest cannot muta
  const publicNews=await mf.dispatchFetch('https://player.test/api/liveops/news');assert.equal(publicNews.status,200);assert.equal((await publicNews.json()).news[0].id,'integration');
  const board=await read('leaderboards','status');assert.equal(board.status,200);assert.equal(board.body.submissionPaused,true);
  assert.equal((await read('leaderboards','top')).status,200);
- await central.prepare("UPDATE state SET role='guest'").run();
+ for(const role of ['manager','guest']) {
+ await central.prepare("UPDATE state SET role=?").bind(role).run();
  assert.equal((await req('/capabilities')).body.canManageLiveOps,false);
  for(const [feature,action,args] of [['mail','send',{operationId:'guest-mail',playerId:'recipient',title:'No'}],['coupons','disable',{}],['news','archive',{}],['leaderboards','pause',{}]])assert.equal((await write(feature,action,args)).status,403);
  for(const [feature,action,args] of [['mail','history',{playerId:'recipient'}],['coupons','list',{}],['news','list',{}],['leaderboards','status',{}]])assert.equal((await read(feature,action,args)).status,200);
+ }
  await central.prepare("UPDATE state SET role='removed'").run();assert.equal((await read('news','list')).status,401);
  assert.equal((await db.prepare('SELECT save_version FROM player WHERE id=?').bind('recipient').first()).save_version,0);assert.equal((await db.prepare('SELECT COUNT(*) n FROM save_revision').first()).n,0);
  for(const path of ['/api/liveops/mail','/api/liveops/grants','/api/liveops/coupons/check'])assert.equal((await mf.dispatchFetch('https://player.test'+path,{method:path.endsWith('check')?'POST':'GET'})).status,401);

@@ -1,3 +1,4 @@
+import { updatePlayerBan } from "./player-ban";
 import { accountDeletionAvailable, accountDeletionStatus, deleteAccount } from './account-deletion';
 import { playerSaveView } from './player-save-view';
 import { legacyEditor, legacySaveEdit } from './legacy-edit';
@@ -7,7 +8,7 @@ import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Env } from "../env";
-import { AdminActionError, requireWriter, type AdminActor } from "./action-types";
+import { AdminActionError, requireAccountRecoveryRole, requireWriter, type AdminActor } from "./action-types";
 import { identityRead, identityPreviewMove, identityMove, identityUnlink, identityResetPassword, identitySetEmail } from "./identities";
 import { auditLegacyRead } from './legacy-playfab';
 import { readWorkspace, type Operation } from "./workspace-read";
@@ -80,8 +81,8 @@ export function createClassicAdminControl() {
       return c.json({ error: typed.code }, typed.status as ContentfulStatusCode);
     return c.json({ error: "classic_admin_service_unavailable" }, 503);
   });
-  const body = async (c: Context<ControlEnv>): Promise<Record<string, unknown>> => {
-    requireWriter(c.get("adminActor"));
+  const body = async (c: Context<ControlEnv>, authorize = requireWriter): Promise<Record<string, unknown>> => {
+    authorize(c.get("adminActor"));
     try { const input: unknown = await c.req.json(); if (object(input)) return input; }
     catch { /* Typed failure, never an exception body. */ }
     throw new AdminActionError("invalid_request");
@@ -93,17 +94,17 @@ export function createClassicAdminControl() {
     const result = await readWorkspace(c.env, operation, args);
     return c.json(result.body, result.status as ContentfulStatusCode);
   };
-  app.post('/legacy/:id/migrate/preview', async c => { await body(c); return c.json(await previewMigration(c.env, c.get('adminActor'), c.req.param('id'))); });
+  app.post('/legacy/:id/migrate/preview', async c => { await body(c, requireAccountRecoveryRole); return c.json(await previewMigration(c.env, c.get('adminActor'), c.req.param('id'))); });
   app.post('/legacy/:id/migrate', async c => {
-    const b = await body(c), actor = c.get('adminActor'), result = await applyMigration(c.env, actor, c.req.param('id'), b);
+    const b = await body(c, requireAccountRecoveryRole), actor = c.get('adminActor'), result = await applyMigration(c.env, actor, c.req.param('id'), b);
     if (b.sendEmail === true && result.emailStatus === 'pending') {
       try { result.emailStatus = (await sendMigrationEmail(c.env, actor, result.playerId)).status; }
       catch { /* Save and login are committed; expose the durable delivery status. */ }
     }
     return c.json(result);
   });
-  app.get('/legacy/:id/migration-email', async c => { requireWriter(c.get('adminActor')); return c.json(await migrationEmailStatus(c.env, c.req.param('id'))); });
-  app.post('/legacy/:id/migration-email', async c => { await body(c); return c.json(await sendMigrationEmail(c.env, c.get('adminActor'), c.req.param('id'))); });
+  app.get('/legacy/:id/migration-email', async c => { requireAccountRecoveryRole(c.get('adminActor')); return c.json(await migrationEmailStatus(c.env, c.req.param('id'))); });
+  app.post('/legacy/:id/migration-email', async c => { await body(c, requireAccountRecoveryRole); return c.json(await sendMigrationEmail(c.env, c.get('adminActor'), c.req.param('id'))); });
   app.get("/legacy/:id/editor", async c => c.json(await legacyEditor(c.env,c.get("adminActor"),{id:c.req.param("id")})));
   app.post("/legacy/:id/revisions", async c => { const b=await body(c);return c.json(await legacySaveEdit(c.env,c.get("adminActor"),{...b,id:c.req.param("id")})); });
   app.get("/legacy", c => read(c, "legacy-search", { query: c.req.query("query") }));
@@ -111,6 +112,13 @@ export function createClassicAdminControl() {
   app.get("/status", c => read(c, "status"));
   app.get("/players", c => read(c, "players", { query: c.req.query("query"), cursor: c.req.query("cursor") }));
   app.get("/players/:id", c => read(c, "player", { id: c.req.param("id") }));
+  app.post("/players/:id/ban", async c => {
+    const actor = c.get("adminActor");
+    if (actor.role === "guest") throw new AdminActionError("forbidden_role", 403);
+    const input: unknown = await c.req.json().catch(() => null);
+    if (!object(input)) throw new AdminActionError("invalid_request");
+    return c.json(await updatePlayerBan(c.env, actor, c.req.param("id"), input));
+  });
   app.get("/players/:id/save-view", async c => c.json(await playerSaveView(c.env, c.req.param("id"))));
   app.get('/players/:id/deletion', async c => c.json(await accountDeletionStatus(c.env, c.get('adminActor'), c.req.param('id'))));
   app.post('/players/:id/delete', async c => { const b = await body(c); return c.json(await deleteAccount(c.env, c.get('adminActor'), c.req.param('id'), b)); });
@@ -142,6 +150,7 @@ export function createClassicAdminControl() {
     return c.json(result.body, result.status as ContentfulStatusCode);
   });
   app.post('/liveops/:feature/:action', async c => {
+    requireWriter(c.get('adminActor'));
     let args: unknown;
     try { args = await c.req.json(); } catch { throw new AdminActionError('invalid_arguments'); }
     if (!object(args)) throw new AdminActionError('invalid_arguments');
@@ -150,7 +159,7 @@ export function createClassicAdminControl() {
     return c.json(result.body, result.status as ContentfulStatusCode);
   });
   app.get("/capabilities", async c => c.json({ game: "ec1", role: c.get("adminActor").role,
-    canWrite: c.get("adminActor").role === "internal", canManageLiveOps: c.get("adminActor").role !== "guest", features: { identities: true, revisions: true, canonicalRevisions: true, liveops: true, accountDeletion: await accountDeletionAvailable(c.env) } }));
+    canWrite: c.get("adminActor").role === "internal", canManageLiveOps: c.get("adminActor").role === "internal", features: { identities: true, revisions: true, canonicalRevisions: true, liveops: true, accountDeletion: await accountDeletionAvailable(c.env) } }));
   app.get("/players/:id/identities", async c => c.json(await identityRead(c.env, c.get("adminActor"), { id: c.req.param("id") })));
   app.post("/players/:id/identities/:provider/move/preview", async c => {
     const b = await body(c);
@@ -175,11 +184,11 @@ export function createClassicAdminControl() {
   app.get("/players/:id/revisions", async c => c.json(await revisionList(c.env, c.get("adminActor"), { id: c.req.param("id"), cursor: c.req.query("cursor"), format: c.req.query("format") })));
   app.get("/players/:id/revisions/:version", async c => c.json(await revisionGet(c.env, c.get("adminActor"), { id: c.req.param("id"), version: Number(c.req.param("version")), format: c.req.query("format") })));
   app.post("/players/:id/revisions/:version/preview", async c => {
-    await body(c);
+    await body(c, requireAccountRecoveryRole);
     return c.json(await revisionPreviewRestore(c.env, c.get("adminActor"), { id: c.req.param("id"), version: Number(c.req.param("version")), format: c.req.query("format") }));
   });
   app.post("/players/:id/revisions/:version/restore", async c => {
-    const b = await body(c);
+    const b = await body(c, requireAccountRecoveryRole);
     return c.json(await revisionRestore(c.env, c.get("adminActor"), { id: c.req.param("id"), version: Number(c.req.param("version")), format: c.req.query("format"), expectedSaveVersion: b.expectedSaveVersion, reviewSha256: b.reviewSha256, operationId: b.operationId }));
   });
   app.all("*", c => c.json({ error: "not_found" }, 404));

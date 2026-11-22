@@ -1,5 +1,5 @@
 import type { Env } from '../env';
-import { AdminActionError, requireWriter, type AdminActor } from './action-types';
+import { AdminActionError, requireAccountRecoveryRole, type AdminActor } from './action-types';
 import { sha256, stableJson } from '../game/validation';
 import { convertLegacyCloud } from '../migration/legacy-conversion';
 import { loadLegacyRevision } from './legacy-edit-storage';
@@ -86,11 +86,11 @@ async function source(env: Env, actor: AdminActor, id: string) {
   return { id, current, snapshot, archiveKey, archiveHash, rawHash: await sha256(selected.CLOUD_ALL_DATA), links, conflicts, email, native, active, reviewSha256, displayName: typeof info.TitleInfo?.DisplayName === 'string' ? info.TitleInfo.DisplayName : null, sourceRevision: edited?.row.revision ?? 0 };
 }
 export async function previewMigration(env: Env, actor: AdminActor, value: unknown) {
-  requireWriter(actor); const id = playerId(value), s = await source(env, actor, id);
+  requireAccountRecoveryRole(actor); const id = playerId(value), s = await source(env, actor, id);
   return { id, displayName: s.displayName, playtime: s.snapshot.playtime, sourceRevision: s.sourceRevision, reviewSha256: s.reviewSha256, email: s.email, googleLinked: s.links.some(i => i.provider === 'google') || s.native.some(i => i.provider === 'google'), conflicts: s.conflicts, activeBanCount: s.active.length, existingLogins: s.native.map(i => i.provider), passwordEmail: s.links.some(i => i.provider === 'email'), normalizations: s.snapshot.normalizations };
 }
 export async function applyMigration(env: Env, actor: AdminActor, value: unknown, args: Record<string, unknown>) {
-  requireWriter(actor); const id = playerId(value);
+  requireAccountRecoveryRole(actor); const id = playerId(value);
   if (typeof args.operationId !== 'string' || !/^[-A-Za-z0-9_]{8,128}$/.test(args.operationId) || typeof args.reviewSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(args.reviewSha256)) throw new AdminActionError('invalid_migration_review');
   const operation = args.operationId, review = args.reviewSha256;
   const replay = async () => {

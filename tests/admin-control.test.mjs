@@ -110,10 +110,12 @@ test('revision preview/download and confirmed restore work through the direct EC
   const list=await request('/players/destination/revisions');assert.deepEqual(list.body.revisions.map(r=>r.version),[2,1]);
   const source=await request('/players/destination/revisions/1');assert.equal(source.status,200);assert.ok(source.body.download.content);
   const path='/players/destination/revisions/1';
+  await mode('manager');
   const preview=await request(path+'/preview',{method:'POST',body:{}});assert.equal(preview.status,200);assert.equal(preview.body.warning,true);
   const body={expectedSaveVersion:preview.body.currentVersion,reviewSha256:preview.body.reviewSha256,operationId:'restore_operation'};
   const restored=await request(path+'/restore',{method:'POST',body});assert.equal(restored.status,200,JSON.stringify(restored));assert.equal(restored.body.saveVersion,3);
   assert.deepEqual((await request(path+'/restore',{method:'POST',body})).body,restored.body);
+  await mode('internal');
   assert.deepEqual((await request('/players/destination/revisions/3')).body.snapshot.data,source.body.snapshot.data);
   assert.equal((await db.prepare("SELECT COUNT(*) n FROM admin_audit WHERE action='save.restore'").first()).n,1);
 });
@@ -163,4 +165,19 @@ test('direct legacy viewer is authenticated, audited, immutable and independent 
   assert.equal((await request('/legacy?query=')).status,400);assert.equal((await request('/legacy/EC1X_new')).status,400);
   await mode('unauthorized');assert.equal((await request('/legacy/ABCDEF1234567890')).status,401);assert.equal(legacyCalls.length,count);
   await mode('internal');assert.equal((await request('/legacy/ABCDEF1234567890',{method:'POST',body:{}})).status,404);
+});
+
+test('manager bans are audited and cannot replace or revoke an active restriction', async () => {
+  const post = body => request('/players/source/ban', { method: 'POST', body });
+  await mode('guest');
+  assert.equal((await post({ reason: 'fixture' })).status, 403);
+  await mode('manager');
+  assert.equal((await post({ reason: 'fixture' })).status, 200);
+  assert.equal((await post({ reason: 'shorter', expiresAt: Math.floor(Date.now() / 1000) + 60 })).status, 409);
+  assert.equal((await post({ revoked: true })).status, 403);
+  assert.equal((await request('/liveops/news/create', { method: 'POST', body: {} })).status, 403);
+  assert.equal((await request('/purchases')).status, 403);
+  assert.equal((await db.prepare("SELECT count(*) AS n FROM admin_audit WHERE action='ban.update' AND player_id='source'").first()).n, 1);
+  await mode('internal');
+  assert.equal((await post({ revoked: true })).status, 200);
 });

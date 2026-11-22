@@ -83,5 +83,5 @@ export interface PlayerContext {
 
 export type AppEnv = {
   Bindings: Env;
-  Variables: { player: PlayerContext; admin: { id: string; name: string } };
+  Variables: { player: PlayerContext; admin: { id: string; name: string; role: "internal" | "manager" | "guest" } };
 };

@@ -298,6 +298,7 @@ function App() {
               {detail ? (
                 <Player
                   key={detail.player.id}
+                  role={admin?.role}
                   detail={detail}
                   busy={busy}
                   run={run}
@@ -366,12 +367,12 @@ type Work = {
   setNote: (text: string) => void;
 };
 function Player({
-  detail,
+  role, detail,
   busy,
   run,
   reload,
   setNote,
-}: Work & { detail: any }) {
+}: Work & { detail: any; role: string }) {
   const [title, setTitle] = useState(""),
     [message, setMessage] = useState(""),
     [rewardId, setRewardId] = useState("ruby"),
@@ -581,10 +582,10 @@ function Player({
       ))}
       {!detail.mail.length && <p className="muted">No mail.</p>}
       <h3>Account restriction</h3>
-      {detail.ban && !detail.ban.revoked_at ? (
+      {detail.ban && !detail.ban.revoked_at && (detail.ban.expires_at == null || detail.ban.expires_at > Date.now() / 1000) ? (
         <div className="notice">
           <p>{detail.ban.reason}</p>
-          <button
+          {role === "internal" && <button
             disabled={busy}
             onClick={() =>
               run(async () => {
@@ -595,9 +596,9 @@ function Player({
             }
           >
             Revoke restriction
-          </button>
+          </button>}
         </div>
-      ) : (
+      ) : (role === "internal" || role === "manager") && (
         <form
           onSubmit={(e) => {
             e.preventDefault();

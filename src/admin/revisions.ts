@@ -1,7 +1,7 @@
 import { summarizeRevisions, saveSummary } from './save-summary';
 import { canonicalRevisionList,canonicalRevisionGet,canonicalRevisionPreview,canonicalRevisionRestore } from './canonical-revisions';
 import type { Env } from '../env';
-import { AdminActionError, requireWriter, type AdminActor } from './action-types';
+import { AdminActionError, requireWriter, requireAccountRecoveryRole, type AdminActor } from './action-types';
 import { publishSnapshot } from '../game/storage';
 import { sha256, stableJson, validateSnapshot, type Snapshot } from '../game/validation';
 export interface Row {
@@ -85,7 +85,7 @@ export async function revisionGet(env: Env, actor: AdminActor, args: Record<stri
 export async function revisionPreviewRestore(env: Env, actor: AdminActor, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if(args.format === 'canonical') return canonicalRevisionPreview(env, actor, args);
     if(args.format !== undefined && args.format !== 'legacy') throw new AdminActionError('invalid_revision_format');
-    requireWriter(actor);
+    requireAccountRecoveryRole(actor);
     const playerId = id(args), sourceVersion = integer(args.version), p = await player(env, playerId);
     const source = await revision(env, playerId, sourceVersion);
     const sourceSnapshot = await verifiedLegacyRevision(env, source);
@@ -107,7 +107,7 @@ export async function revisionPreviewRestore(env: Env, actor: AdminActor, args: 
 export async function revisionRestore(env: Env, actor: AdminActor, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if(args.format === 'canonical') return canonicalRevisionRestore(env, actor, args);
     if(args.format !== undefined && args.format !== 'legacy') throw new AdminActionError('invalid_revision_format');
-    requireWriter(actor);
+    requireAccountRecoveryRole(actor);
     const playerId = id(args), sourceVersion = integer(args.version), expectedSaveVersion = args.expectedSaveVersion;
     if (!Number.isSafeInteger(expectedSaveVersion) || Number(expectedSaveVersion) < 0 || typeof args.reviewSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(args.reviewSha256) || typeof args.operationId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(args.operationId))
         throw new AdminActionError('invalid_restore_request');

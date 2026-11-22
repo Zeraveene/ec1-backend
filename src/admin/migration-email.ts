@@ -1,6 +1,6 @@
 import type { Env } from '../env';
 import { passwordHash, random } from '../auth/crypto';
-import { AdminActionError, requireWriter, type AdminActor } from './action-types';
+import { AdminActionError, requireAccountRecoveryRole, type AdminActor } from './action-types';
 
 async function key(env: Env) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('ec1/admin-migration-email/v1/' + env.PLAYER_TOKEN_SECRET));
@@ -19,7 +19,7 @@ export async function migrationEmailStatus(env: Env, id: string) {
 // Separate retryable delivery from publication. Passwords never enter responses,
 // audit records or plaintext storage. Existing credentials are never replaced.
 export async function sendMigrationEmail(env: Env, actor: AdminActor, id: string) {
-  requireWriter(actor);
+  requireAccountRecoveryRole(actor);
   if (!env.EMAIL || !env.MAIL_FROM || !env.PASSWORD_RESET_ORIGIN || !/^https:\/\/[^/?#]+$/.test(env.PASSWORD_RESET_ORIGIN)) throw new AdminActionError('email_not_configured', 503);
   const attempt = crypto.randomUUID(), now = Date.now();
   const row = await env.DB.prepare("UPDATE classic_migration_email SET status='sending',attempt_id=?,updated_at=? WHERE player_id=? AND status IN ('pending','failed') RETURNING recipient,password_hash,encrypted_password")
