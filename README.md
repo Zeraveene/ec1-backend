@@ -23,7 +23,7 @@ Run `npx wrangler d1 migrations apply epicon1-player-data-staging --env staging 
 
 All resources belong to the existing Cloudflare account. Signing secrets differ by environment and purpose. `secrets/` and `.dev.vars*` are ignored; they must never enter Git, dashboard assets or Unity player builds.
 
-`wrangler.toml` contains explicit resource IDs. Apply migrations to the matching database before deployment. The staging Worker was deleted at the user’s request; do not run `npm run deploy:staging`, recreate it or provision its secrets. Its checked-in environment remains usable for local synthetic development only. `npm run deploy` checks and deploys production preparation, where new accounts and migration remain disabled. Deployment requires user authorization and does not itself enable migration, purchases or recovery.
+`wrangler.toml` contains explicit resource IDs. Apply migrations to the matching database before deployment. The staging Worker was deleted at the user’s request; do not run `npm run deploy:staging`, recreate it or provision its secrets. Its checked-in environment remains usable for local synthetic development only. `npm run deploy` checks and deploys the production configuration, which enables new account creation. Deployment requires user authorization.
 
 ## Account and save guarantees
 

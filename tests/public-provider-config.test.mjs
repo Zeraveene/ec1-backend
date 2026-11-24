@@ -20,11 +20,10 @@ test('existing Google audience matches the public local example', () => {
   assert.equal(exampleValue('GOOGLE_CLIENT_IDS'), productionValue('GOOGLE_CLIENT_IDS'));
 });
 
-test('production enables migration, manual backups, password recovery and verified purchases', () => {
-  for (const name of ['LEGACY_MIGRATION_ENABLED', 'EC1_MANUAL_BACKUPS_ENABLED', 'RECOVERY_ENABLED', 'IAP_PURCHASES_ENABLED'])
+test('production enables registration, migration, manual backups, password recovery and verified purchases', () => {
+  for (const name of ['ALLOW_NEW_ACCOUNTS', 'LEGACY_MIGRATION_ENABLED', 'EC1_MANUAL_BACKUPS_ENABLED', 'RECOVERY_ENABLED', 'IAP_PURCHASES_ENABLED'])
     assert.equal(productionValue(name), 'true', name);
-  for (const name of ['ALLOW_NEW_ACCOUNTS', 'IAP_ALLOW_TEST_PURCHASES'])
-    assert.equal(productionValue(name), 'false', name);
+  assert.equal(productionValue('IAP_ALLOW_TEST_PURCHASES'), 'false');
   assert.doesNotMatch(productionSection, /^APPLE_(?:PRIVATE_KEY|CLIENT_SECRET|KEY_ID)\s*=/m);
 });
 
